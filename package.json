@@ -1,0 +1,13 @@
+{
+  "name": "d2c-logistics",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api start:dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r --if-present test",
+    "db:up": "docker compose up -d postgres redis"
+  }
+}

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: d2c
+          POSTGRES_PASSWORD: d2c
+          POSTGRES_DB: d2c_logistics
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U d2c" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://d2c:d2c@localhost:5432/d2c_logistics?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Database
+        working-directory: apps/api
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma migrate deploy
+      - name: API lint, tests, build
+        working-directory: apps/api
+        run: |
+          pnpm lint
+          pnpm test
+          pnpm test:e2e
+          pnpm build
+      - name: Web lint and build
+        working-directory: apps/web
+        run: |
+          pnpm lint
+          pnpm build

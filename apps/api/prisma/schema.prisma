@@ -1,0 +1,349 @@
+// D2C Logistics data model.
+// Every business record carries brandId so the platform can serve many brands
+// from day one; our own D2C business is simply the first brand.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Tenancy and people ----------
+
+model Brand {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  users      User[]
+  warehouses Warehouse[]
+  orders     Order[]
+  shipments  Shipment[]
+  pickups    Pickup[]
+  tasks      Task[]
+  redFlags   RedFlag[]
+  auditLogs  AuditLog[]
+}
+
+enum Role {
+  ADMIN
+  OPS
+  WAREHOUSE
+  SUPPORT
+  FINANCE
+  VENDOR // vendor partner login, limited to its own warehouse
+  COURIER // courier partner login, limited to its own courier's pickups
+}
+
+model User {
+  id          String   @id @default(cuid())
+  brandId     String
+  brand       Brand    @relation(fields: [brandId], references: [id])
+  name        String
+  phone       String
+  email       String?
+  role        Role
+  managerId   String?
+  manager     User?    @relation("ManagerReports", fields: [managerId], references: [id])
+  reports     User[]   @relation("ManagerReports")
+  warehouseId String? // set for VENDOR users
+  courierCode String? // set for COURIER users
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  ownedTasks Task[] @relation("TaskOwner")
+
+  @@unique([brandId, phone])
+}
+
+// ---------- Places ----------
+
+model Warehouse {
+  id            String   @id @default(cuid())
+  brandId       String
+  brand         Brand    @relation(fields: [brandId], references: [id])
+  code          String // e.g. WHFQFV, same IDs as the Velocity sheet
+  name          String // e.g. Star India
+  address       String
+  city          String
+  state         String
+  pincode       String
+  contactName   String
+  contactPhone  String
+  cluster       String? // pickup cluster, e.g. "Mumbai West - Malad"
+  isRtoLocation Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  pickupOrders Order[]  @relation("PickupWarehouse")
+  rtoOrders    Order[]  @relation("RtoWarehouse")
+  pickups      Pickup[]
+
+  @@unique([brandId, code])
+}
+
+// ---------- Couriers ----------
+
+enum CourierMode {
+  DEMO
+  LIVE
+}
+
+model Courier {
+  code      String      @id // DELHIVERY, EKART, SHADOWFAX, BLUEDART, XPRESSBEES, AMAZON, BLITZ, PIKNDEL
+  name      String
+  mode      CourierMode @default(DEMO)
+  active    Boolean     @default(true)
+  isBackup  Boolean     @default(false)
+  createdAt DateTime    @default(now())
+
+  shipments Shipment[]
+  pickups   Pickup[]
+}
+
+// ---------- Orders and shipments ----------
+
+enum PaymentMode {
+  PREPAID
+  COD
+}
+
+enum OrderSource {
+  MANUAL
+  CSV
+  OMS_GURU
+  API
+}
+
+enum OrderStatus {
+  NEW
+  READY_TO_SHIP
+  IN_TRANSIT
+  DELIVERED
+  NEEDS_ATTENTION
+  RTO
+  CANCELLED
+}
+
+model Order {
+  id                String      @id @default(cuid())
+  brandId           String
+  brand             Brand       @relation(fields: [brandId], references: [id])
+  orderNumber       String // order ID from OMS / store
+  source            OrderSource @default(MANUAL)
+  status            OrderStatus @default(NEW)
+  pickupWarehouseId String
+  pickupWarehouse   Warehouse   @relation("PickupWarehouse", fields: [pickupWarehouseId], references: [id])
+  rtoWarehouseId    String?
+  rtoWarehouse      Warehouse?  @relation("RtoWarehouse", fields: [rtoWarehouseId], references: [id])
+
+  customerName  String
+  customerPhone String
+  customerEmail String?
+  addressLine   String
+  city          String
+  state         String
+  pincode       String
+
+  paymentMode  PaymentMode
+  orderValue   Decimal     @db.Decimal(12, 2)
+  codAmount    Decimal     @default(0) @db.Decimal(12, 2)
+  codConfirmed Boolean? // null = not asked yet
+  weightGrams  Int
+  lengthCm     Int
+  breadthCm    Int
+  heightCm     Int
+  items        Json // [{ name, sku, qty, price }]
+  rtoRisk      Int? // 0-100, rule-based first
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  shipments Shipment[]
+  messages  Message[]
+
+  // Duplicate-booking lock: one order number per brand.
+  @@unique([brandId, orderNumber])
+  @@index([brandId, status])
+  @@index([customerPhone])
+}
+
+enum ShipmentStatus {
+  BOOKED
+  PICKUP_SCHEDULED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  NDR
+  RTO_INITIATED
+  RTO_DELIVERED
+  CANCELLED
+}
+
+model Shipment {
+  id               String         @id @default(cuid())
+  brandId          String
+  brand            Brand          @relation(fields: [brandId], references: [id])
+  orderId          String
+  order            Order          @relation(fields: [orderId], references: [id])
+  courierCode      String
+  courier          Courier        @relation(fields: [courierCode], references: [code])
+  awb              String
+  isDemo           Boolean        @default(true)
+  status           ShipmentStatus @default(BOOKED)
+  chargedAmount    Decimal        @db.Decimal(12, 2)
+  chargedWeightG   Int
+  labelUrl         String?
+  packingProofUrls String[]
+  expectedDelivery DateTime?
+  pickupId         String?
+  pickup           Pickup?        @relation(fields: [pickupId], references: [id])
+  lastScanAt       DateTime?
+  idempotencyKey   String         @unique // a retried booking never creates a second shipment
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  events   TrackingEvent[]
+  tasks    Task[]
+  redFlags RedFlag[]
+
+  @@unique([courierCode, awb])
+  @@index([brandId, status])
+}
+
+model TrackingEvent {
+  id         String         @id @default(cuid())
+  shipmentId String
+  shipment   Shipment       @relation(fields: [shipmentId], references: [id])
+  status     ShipmentStatus
+  location   String?
+  remark     String?
+  occurredAt DateTime
+  receivedAt DateTime       @default(now())
+
+  @@index([shipmentId, occurredAt])
+}
+
+// ---------- Pickups (slots, confirmation, reliability) ----------
+
+enum PickupStatus {
+  SCHEDULED
+  CONFIRMED // courier confirmed an executive before the slot
+  PICKED_UP
+  MISSED
+  POSTPONED
+  REASSIGNED // moved to backup courier
+  CANCELLED
+}
+
+model Pickup {
+  id             String       @id @default(cuid())
+  brandId        String
+  brand          Brand        @relation(fields: [brandId], references: [id])
+  warehouseId    String
+  warehouse      Warehouse    @relation(fields: [warehouseId], references: [id])
+  courierCode    String
+  courier        Courier      @relation(fields: [courierCode], references: [code])
+  slotStart      DateTime
+  slotEnd        DateTime
+  status         PickupStatus @default(SCHEDULED)
+  executiveName  String?
+  executivePhone String?
+  confirmedAt    DateTime?
+  pickedUpAt     DateTime?
+  missCount      Int          @default(0)
+  postponeReason String?
+  missReason     String? // given by courier partner
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  shipments Shipment[]
+
+  @@index([brandId, slotStart])
+}
+
+// ---------- Ownership board, red flags, chat ----------
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+
+model Task {
+  id              String     @id @default(cuid())
+  brandId         String
+  brand           Brand      @relation(fields: [brandId], references: [id])
+  shipmentId      String?
+  shipment        Shipment?  @relation(fields: [shipmentId], references: [id])
+  title           String
+  type            String // PICKUP_MISSED, STUCK, NDR, CUSTOMER_REPLY, RCA, ...
+  ownerId         String
+  owner           User       @relation("TaskOwner", fields: [ownerId], references: [id])
+  dueAt           DateTime
+  status          TaskStatus @default(OPEN)
+  escalationLevel Int        @default(0) // 0 owner, 1 manager, 2 courier KAM, 3 founder
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([brandId, status, dueAt])
+}
+
+enum FlagSeverity {
+  WARNING
+  CRITICAL
+}
+
+model RedFlag {
+  id         String       @id @default(cuid())
+  brandId    String
+  brand      Brand        @relation(fields: [brandId], references: [id])
+  shipmentId String?
+  shipment   Shipment?    @relation(fields: [shipmentId], references: [id])
+  type       String // SLOT_MISSED, NO_SCAN_48H, NDR_NO_ACTION, CUSTOMER_UNANSWERED, TASK_OVERDUE
+  severity   FlagSeverity
+  message    String
+  resolvedAt DateTime?
+  createdAt  DateTime     @default(now())
+
+  @@index([brandId, resolvedAt])
+}
+
+enum SenderType {
+  CUSTOMER
+  BRAND
+  SYSTEM
+}
+
+model Message {
+  id         String     @id @default(cuid())
+  orderId    String
+  order      Order      @relation(fields: [orderId], references: [id])
+  senderType SenderType
+  senderName String?
+  body       String
+  channel    String     @default("WEB") // WEB, WHATSAPP, SMS, EMAIL
+  createdAt  DateTime   @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+// ---------- Audit ----------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  brandId    String
+  brand      Brand    @relation(fields: [brandId], references: [id])
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now())
+
+  @@index([brandId, entityType, entityId])
+}
