@@ -111,12 +111,26 @@ export function DemoBadge() {
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Field({
+  label,
+  hint,
+  error,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  error?: string | null;
+  children: ReactNode;
+}) {
   return (
-    <label className="block">
+    <label className={clsx("block", error && "[&_input]:border-flag-red [&_select]:border-flag-red")}>
       <span className="mb-1.5 block text-[13px] font-medium text-ink-2">{label}</span>
       {children}
-      {hint ? <span className="mt-1 block text-xs text-muted">{hint}</span> : null}
+      {error ? (
+        <span className="mt-1 block text-xs font-medium text-flag-red">{error}</span>
+      ) : hint ? (
+        <span className="mt-1 block text-xs text-muted">{hint}</span>
+      ) : null}
     </label>
   );
 }

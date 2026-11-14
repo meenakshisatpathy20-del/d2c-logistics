@@ -6,14 +6,14 @@ Shipping platform for D2C Ecommerce India: book, ship, track and manage every or
 
 | Path | What it is |
 | --- | --- |
-| `apps/web` | Website (Next.js + TypeScript + Tailwind). Login, Control Tower, Orders, Book Shipment |
+| `apps/web` | Website (Next.js + TypeScript + Tailwind). Login, Today, Shipments (journey board and table), New shipment panel (one order or bulk CSV) |
 | `apps/api` | Backend API (NestJS + TypeScript), database layer (Prisma + PostgreSQL) |
 | `apps/api/prisma/schema.prisma` | Data model: brands, users, warehouses, couriers, orders, shipments, tracking, pickups, tasks, red flags, messages, audit log |
 | `apps/api/src/couriers` | Courier engine. Every courier sits behind one interface; all 8 run in demo mode today |
 
 ## Couriers
 
-Delhivery, Ekart, Shadowfax, Blue Dart, Xpressbees, Amazon Shipping, Blitz and Pikndel run in **demo mode**: realistic rates, AWB numbers and tracking, with no outside calls. Demo rates are illustrative, not real contracted rates. Switching a courier to live replaces its adapter; nothing else changes.
+Delhivery, Ekart, Shadowfax, Blue Dart, Xpressbees, Amazon Shipping, Blitz and Pikndel run in **demo mode**: realistic rates, AWB numbers and tracking, with no outside calls. The recommended courier is the cheapest one with reliable pickups (85%+ on time). Demo rates are illustrative, not real contracted rates. Switching a courier to live replaces its adapter; nothing else changes.
 
 ## Run locally
 

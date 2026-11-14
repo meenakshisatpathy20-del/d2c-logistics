@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { RateRequestSchema } from './courier.types.js';
+import { BookingRequestSchema, RateRequestSchema } from './courier.types.js';
 import { CouriersService } from './couriers.service.js';
 
 @Controller('couriers')
@@ -18,6 +18,21 @@ export class CouriersController {
       throw new BadRequestException(parsed.error.issues.map((i) => i.message));
     }
     return this.couriers.compareRates(parsed.data);
+  }
+
+  /** Demo booking: returns the courier's AWB, charge and expected delivery. Saving to the database comes next. */
+  @Post(':code/book')
+  async book(@Param('code') code: string, @Body() body: unknown) {
+    const parsed = BookingRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.issues.map((i) => i.message));
+    }
+    const adapter = this.couriers.get(code.toUpperCase());
+    if (!adapter.quote(parsed.data).serviceable) {
+      throw new BadRequestException(`${adapter.name} does not deliver to pin code ${parsed.data.destinationPincode}`);
+    }
+    const result = await adapter.book(parsed.data);
+    return { courierCode: adapter.code, courierName: adapter.name, mode: adapter.mode, ...result };
   }
 
   @Get(':code/track/:awb')

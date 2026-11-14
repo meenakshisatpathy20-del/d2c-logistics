@@ -68,6 +68,8 @@ export class DemoCourierAdapter implements CourierAdapter {
       codCharge,
       total: round2(freight + codCharge),
       etaDays,
+      pickupOnTimePct: p.pickupOnTimePct,
+      recommended: false,
     };
   }
 

@@ -1,7 +1,25 @@
 import type { Zone } from '../courier.types.js';
 
-/** First three digits of metro-city pin codes. */
-const METRO_PREFIXES = ['110', '400', '560', '600', '700', '500', '411', '380'];
+/**
+ * Metro areas by the first three digits of their pin codes. Parcels within one
+ * metro area (e.g. Noida to Delhi, Thane to Mumbai) are local; between two metro
+ * areas they are metro.
+ */
+const METRO_AREAS: Record<string, string[]> = {
+  'Delhi NCR': ['110', '121', '122', '201'],
+  Mumbai: ['400', '401'],
+  Bengaluru: ['560', '562'],
+  Chennai: ['600', '603'],
+  Kolkata: ['700', '711'],
+  Hyderabad: ['500', '501'],
+  Pune: ['411', '412'],
+  Ahmedabad: ['380', '382'],
+};
+
+function metroArea(pincode: string): string | undefined {
+  const prefix = pincode.slice(0, 3);
+  return Object.keys(METRO_AREAS).find((area) => METRO_AREAS[area].includes(prefix));
+}
 
 /** Pin code prefixes with hard-to-reach delivery: North East (78, 79), Sikkim (737),
  * J&K/Ladakh (18, 19) and Andaman & Nicobar (744). */
@@ -41,12 +59,10 @@ function isSpecial(pincode: string): boolean {
 export function zoneFor(origin: string, destination: string): Zone {
   if (isSpecial(destination)) return 'SPECIAL';
   if (origin.slice(0, 3) === destination.slice(0, 3)) return 'LOCAL';
-  if (
-    METRO_PREFIXES.includes(origin.slice(0, 3)) &&
-    METRO_PREFIXES.includes(destination.slice(0, 3))
-  ) {
-    return 'METRO';
-  }
+  const from = metroArea(origin);
+  const to = metroArea(destination);
+  if (from && from === to) return 'LOCAL';
+  if (from && to) return 'METRO';
   if (origin[0] === destination[0]) return 'REGIONAL';
   return 'NATIONAL';
 }

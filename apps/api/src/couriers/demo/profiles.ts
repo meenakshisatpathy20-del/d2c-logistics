@@ -19,6 +19,8 @@ export interface DemoCourierProfile {
   awbLength: number;
   /** Zones this courier serves. Hyperlocal partners serve LOCAL only. */
   zones: Zone[];
+  /** Demo pickup on-time %, standing in for the scorecard built from our own shipments. */
+  pickupOnTimePct: number;
 }
 
 const ALL_ZONES: Zone[] = ['LOCAL', 'REGIONAL', 'METRO', 'NATIONAL', 'SPECIAL'];
@@ -35,6 +37,7 @@ export const DEMO_COURIERS: DemoCourierProfile[] = [
     awbPrefix: '1490',
     awbLength: 14,
     zones: ALL_ZONES,
+    pickupOnTimePct: 96,
   },
   {
     code: 'EKART',
@@ -47,6 +50,7 @@ export const DEMO_COURIERS: DemoCourierProfile[] = [
     awbPrefix: 'FMPC',
     awbLength: 14,
     zones: ALL_ZONES,
+    pickupOnTimePct: 88,
   },
   {
     code: 'SHADOWFAX',
@@ -59,6 +63,7 @@ export const DEMO_COURIERS: DemoCourierProfile[] = [
     awbPrefix: 'SF',
     awbLength: 13,
     zones: ['LOCAL', 'REGIONAL', 'METRO', 'NATIONAL'],
+    pickupOnTimePct: 91,
   },
   {
     code: 'BLUEDART',
@@ -71,6 +76,7 @@ export const DEMO_COURIERS: DemoCourierProfile[] = [
     awbPrefix: '7728',
     awbLength: 11,
     zones: ALL_ZONES,
+    pickupOnTimePct: 94,
   },
   {
     code: 'XPRESSBEES',
@@ -83,6 +89,7 @@ export const DEMO_COURIERS: DemoCourierProfile[] = [
     awbPrefix: '1416',
     awbLength: 14,
     zones: ALL_ZONES,
+    pickupOnTimePct: 72,
   },
   {
     code: 'AMAZON',
@@ -95,6 +102,7 @@ export const DEMO_COURIERS: DemoCourierProfile[] = [
     awbPrefix: '3740',
     awbLength: 12,
     zones: ['LOCAL', 'REGIONAL', 'METRO', 'NATIONAL'],
+    pickupOnTimePct: 92,
   },
   {
     code: 'BLITZ',
@@ -107,6 +115,7 @@ export const DEMO_COURIERS: DemoCourierProfile[] = [
     awbPrefix: 'BLZ',
     awbLength: 12,
     zones: ['LOCAL'],
+    pickupOnTimePct: 90,
   },
   {
     code: 'PIKNDEL',
@@ -119,5 +128,6 @@ export const DEMO_COURIERS: DemoCourierProfile[] = [
     awbPrefix: 'PKD',
     awbLength: 12,
     zones: ['LOCAL'],
+    pickupOnTimePct: 89,
   },
 ];

@@ -2,6 +2,7 @@
 
 import { ArrowRight, Bell, ShieldCheck, Truck } from "lucide-react";
 import { motion } from "motion/react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { BrandLogo, Logo, OUR_BRANDS } from "@/components/ui/logo";
 import { Button, Field, inputClass } from "@/components/ui/primitives";
@@ -13,6 +14,7 @@ const POINTS = [
 ];
 
 export default function LoginPage() {
+  const router = useRouter();
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [phone, setPhone] = useState("");
   const validPhone = /^[6-9]\d{9}$/.test(phone);
@@ -81,6 +83,7 @@ export default function LoginPage() {
             onSubmit={(e) => {
               e.preventDefault();
               if (step === "phone" && validPhone) setStep("otp");
+              else if (step === "otp") router.push("/");
             }}
           >
             {step === "phone" ? (

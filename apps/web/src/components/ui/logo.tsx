@@ -1,7 +1,18 @@
 import Image from "next/image";
 
 /** Official D2C Ecommerce logo (from d2cecommerce.in), with the Logistics product name. */
-export function Logo({ onDark = false }: { onDark?: boolean }) {
+export function Logo({ onDark = false, compact = false }: { onDark?: boolean; compact?: boolean }) {
+  if (compact) {
+    return (
+      <span className="flex items-center gap-2.5">
+        <Image src="/brand/d2c-ecommerce.webp" alt="D2C Ecommerce" width={900} height={284} priority className="h-7 w-auto" />
+        <span className="hidden h-6 w-px bg-line sm:block" aria-hidden />
+        <span className="hidden text-[11px] font-semibold uppercase tracking-[0.24em] text-brand-blue-deep sm:block">
+          Logistics
+        </span>
+      </span>
+    );
+  }
   return (
     <div className="inline-flex flex-col items-start gap-1">
       <span className={onDark ? "rounded-xl bg-white px-3 py-2" : undefined}>

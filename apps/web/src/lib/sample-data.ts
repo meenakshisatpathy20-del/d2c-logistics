@@ -1,121 +1,133 @@
 /**
- * Sample data for the screen designs. Vendor names match our pickup points;
+ * Sample data for the screen designs. Vendor and brand names are real;
  * customer names are shortened and phone numbers masked. Replaced by live API
  * data once the screens are approved.
  */
 import type { Tone } from "@/components/ui/primitives";
 
-export type OrderTab = "NEW" | "READY_TO_SHIP" | "IN_TRANSIT" | "DELIVERED" | "NEEDS_ATTENTION" | "RTO";
+export const formatINR = (n: number) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
 
-export const ORDER_TABS: { key: OrderTab; label: string; count: number }[] = [
-  { key: "NEW", label: "New", count: 13 },
-  { key: "READY_TO_SHIP", label: "Ready to ship", count: 4 },
-  { key: "IN_TRANSIT", label: "In transit", count: 7 },
-  { key: "DELIVERED", label: "Delivered", count: 271 },
-  { key: "NEEDS_ATTENTION", label: "Needs attention", count: 1 },
-  { key: "RTO", label: "RTO", count: 2 },
+// ---------- Journey lanes ----------
+
+export type Lane = "PROBLEM" | "TO_PACK" | "READY" | "PICKED" | "MOVING" | "OUT_TODAY" | "DELIVERED";
+
+export const LANES: { key: Lane; label: string; hint: string; tone: Tone }[] = [
+  { key: "PROBLEM", label: "Needs a fix", hint: "Stuck, failed or late", tone: "red" },
+  { key: "TO_PACK", label: "To pack", hint: "New orders", tone: "orange" },
+  { key: "READY", label: "Ready for pickup", hint: "Booked, slot set", tone: "amber" },
+  { key: "MOVING", label: "On the way", hint: "Picked up, moving between hubs", tone: "blue" },
+  { key: "OUT_TODAY", label: "Out today", hint: "Arriving today", tone: "green" },
+  { key: "DELIVERED", label: "Delivered", hint: "Today", tone: "green" },
 ];
 
-export type SampleOrder = {
-  id: string;
-  date: string;
+export type Shipment = {
+  id: string; // order number
+  brand: string;
+  brandSlug: string;
+  product: string;
   customer: string;
   phone: string;
   city: string;
   pincode: string;
-  brand: string;
-  product: string;
-  qty: number;
-  weightKg: number;
-  dims: string;
   payment: "COD" | "Prepaid";
   amount: number;
   vendor: string;
-  tab: OrderTab;
-  status: string;
-  statusTone: Tone;
+  lane: Lane;
   courier?: string;
   awb?: string;
+  note: string; // the one line that matters on the card
+  noteTone: Tone;
+  owner: string; // initials
+  ownerName: string;
+  problem?: string;
   rtoRisk?: "High" | "Medium";
-  weightMismatch?: boolean;
+  weightKg: number;
+  dims: string;
+  placedAt: string;
 };
 
-export const SAMPLE_ORDERS: SampleOrder[] = [
-  { id: "18909", date: "14 Nov, 12:00", customer: "Bhawana J.", phone: "98xxxxxx21", city: "Mumbai", pincode: "401107", brand: "AccessHer", product: "Gold-plated bangles set", qty: 1, weightKg: 5.28, dims: "40×33×20", payment: "COD", amount: 360, vendor: "Star India", tab: "NEW", status: "New", statusTone: "orange", rtoRisk: "High", weightMismatch: true },
-  { id: "18908", date: "14 Nov, 10:14", customer: "Divya M.", phone: "97xxxxxx08", city: "Chennai", pincode: "603112", brand: "AccessHer", product: "Kada bangle set", qty: 1, weightKg: 5.28, dims: "40×33×20", payment: "COD", amount: 614, vendor: "Laxmi Imitation", tab: "NEW", status: "New", statusTone: "orange", weightMismatch: true },
-  { id: "18907", date: "14 Nov, 09:40", customer: "Arjun P.", phone: "99xxxxxx44", city: "Bengaluru", pincode: "560034", brand: "AccessHim", product: "Steel bracelet", qty: 2, weightKg: 0.4, dims: "15×10×5", payment: "COD", amount: 899, vendor: "Reemm Creations", tab: "NEW", status: "New", statusTone: "orange", rtoRisk: "Medium" },
-  { id: "18906", date: "14 Nov, 09:12", customer: "Neha S.", phone: "98xxxxxx17", city: "New Delhi", pincode: "110017", brand: "Drape N Don", product: "Cotton kurta set", qty: 1, weightKg: 0.7, dims: "30×25×5", payment: "Prepaid", amount: 1499, vendor: "D2C Main Warehouse", tab: "NEW", status: "New", statusTone: "orange" },
-  { id: "18902", date: "13 Nov, 18:30", customer: "Priya N.", phone: "90xxxxxx63", city: "Pune", pincode: "411014", brand: "Bagssy", product: "Tote handbag", qty: 1, weightKg: 0.9, dims: "35×28×10", payment: "Prepaid", amount: 1299, vendor: "Mundi (Apex Enterprise)", tab: "READY_TO_SHIP", status: "Pickup 2–4 pm today", statusTone: "blue", courier: "Xpressbees", awb: "14160093820415" },
-  { id: "18899", date: "12 Nov, 16:05", customer: "Imran A.", phone: "96xxxxxx02", city: "Hyderabad", pincode: "500081", brand: "Hungama HiLife", product: "G1 smartwatch", qty: 1, weightKg: 0.3, dims: "12×10×8", payment: "COD", amount: 1099, vendor: "Star India", tab: "IN_TRANSIT", status: "In transit · Hyderabad hub", statusTone: "blue", courier: "Delhivery", awb: "14905527310946" },
-  { id: "18897", date: "12 Nov, 11:20", customer: "Kavya T.", phone: "94xxxxxx58", city: "Kochi", pincode: "682024", brand: "Luxura Sciences", product: "Argan hair oil", qty: 1, weightKg: 0.8, dims: "32×26×6", payment: "Prepaid", amount: 549, vendor: "Laxmi Imitation", tab: "IN_TRANSIT", status: "No scan for 52 h", statusTone: "red", courier: "Ekart", awb: "FMPC3301847219" },
-  { id: "18886", date: "04 Nov, 18:56", customer: "Sahil K.", phone: "98xxxxxx97", city: "Mumbai", pincode: "400097", brand: "Kasrat", product: "Hex dumbbell pair", qty: 1, weightKg: 2, dims: "30×20×15", payment: "Prepaid", amount: 2224, vendor: "D2C Main Warehouse", tab: "NEEDS_ATTENTION", status: "NDR · Attempt 1", statusTone: "amber", courier: "Blue Dart", awb: "77280550314", rtoRisk: "High" },
-  { id: "18870", date: "06 Oct, 08:54", customer: "Sana R.", phone: "93xxxxxx76", city: "Noida", pincode: "201307", brand: "Hungama HiLife", product: "Bounce earbuds", qty: 1, weightKg: 2, dims: "30×20×15", payment: "Prepaid", amount: 2224, vendor: "D2C Main Warehouse", tab: "RTO", status: "RTO delivered", statusTone: "grey", courier: "Amazon Shipping", awb: "374070260863" },
+export const SHIPMENTS: Shipment[] = [
+  { id: "18886", brand: "Kasrat", brandSlug: "kasrat", product: "Hex dumbbell pair", customer: "Sahil K.", phone: "98xxxxxx97", city: "Mumbai", pincode: "400097", payment: "Prepaid", amount: 2224, vendor: "D2C Main Warehouse", lane: "PROBLEM", courier: "Blue Dart", awb: "77280550314", note: "Delivery failed · customer picked tomorrow 6–9 pm", noteTone: "red", owner: "SE", ownerName: "Support Executive", problem: "NDR", weightKg: 2, dims: "30×20×15", placedAt: "04 Nov" },
+  { id: "18897", brand: "Luxura Sciences", brandSlug: "luxura", product: "Argan hair oil", customer: "Kavya T.", phone: "94xxxxxx58", city: "Kochi", pincode: "682024", payment: "Prepaid", amount: 549, vendor: "Laxmi Imitation", lane: "PROBLEM", courier: "Ekart", awb: "FMPC3301847219", note: "No scan for 52 h · RCA sent to Ekart", noteTone: "red", owner: "OE", ownerName: "Ops Executive", problem: "Stuck", weightKg: 0.8, dims: "32×26×6", placedAt: "12 Nov" },
+  { id: "18895", brand: "AccessHer", brandSlug: "accessher", product: "Pearl earrings", customer: "Hetal P.", phone: "97xxxxxx31", city: "Ahmedabad", pincode: "380015", payment: "COD", amount: 699, vendor: "Star India", lane: "PROBLEM", courier: "Delhivery", awb: "14905527310971", note: "Gujarat delay · customer informed", noteTone: "amber", owner: "OE", ownerName: "Ops Executive", problem: "Late", weightKg: 0.3, dims: "12×10×5", placedAt: "11 Nov" },
+
+  { id: "18909", brand: "AccessHer", brandSlug: "accessher", product: "Gold-plated bangles set", customer: "Bhawana J.", phone: "98xxxxxx21", city: "Mumbai", pincode: "401107", payment: "COD", amount: 360, vendor: "Star India", lane: "TO_PACK", note: "COD confirmed · weight to check", noteTone: "amber", owner: "OE", ownerName: "Ops Executive", rtoRisk: "High", weightKg: 5.28, dims: "40×33×20", placedAt: "Today 12:00" },
+  { id: "18908", brand: "AccessHer", brandSlug: "accessher", product: "Kada bangle set", customer: "Divya M.", phone: "97xxxxxx08", city: "Chennai", pincode: "603112", payment: "COD", amount: 614, vendor: "Laxmi Imitation", lane: "TO_PACK", note: "Waiting for COD confirmation", noteTone: "grey", owner: "OE", ownerName: "Ops Executive", weightKg: 5.28, dims: "40×33×20", placedAt: "Today 10:14" },
+  { id: "18907", brand: "AccessHim", brandSlug: "accesshim", product: "Steel bracelet", customer: "Arjun P.", phone: "99xxxxxx44", city: "Bengaluru", pincode: "560034", payment: "COD", amount: 899, vendor: "Reemm Creations", lane: "TO_PACK", note: "Ready to book", noteTone: "green", owner: "OE", ownerName: "Ops Executive", rtoRisk: "Medium", weightKg: 0.4, dims: "15×10×5", placedAt: "Today 09:40" },
+  { id: "18906", brand: "Drape N Don", brandSlug: "drape-n-don", product: "Cotton kurta set", customer: "Neha S.", phone: "98xxxxxx17", city: "New Delhi", pincode: "110017", payment: "Prepaid", amount: 1499, vendor: "D2C Main Warehouse", lane: "TO_PACK", note: "Ready to book", noteTone: "green", owner: "OE", ownerName: "Ops Executive", weightKg: 0.7, dims: "30×25×5", placedAt: "Today 09:12" },
+
+  { id: "18902", brand: "Bagssy", brandSlug: "bagssy", product: "Tote handbag", customer: "Priya N.", phone: "90xxxxxx63", city: "Pune", pincode: "411014", payment: "Prepaid", amount: 1299, vendor: "Mundi (Apex Enterprise)", lane: "READY", courier: "Xpressbees", awb: "14160093820415", note: "Pickup 2–4 pm · executive confirmed", noteTone: "blue", owner: "OE", ownerName: "Ops Executive", weightKg: 0.9, dims: "35×28×10", placedAt: "13 Nov" },
+  { id: "18901", brand: "Hungama HiLife", brandSlug: "hilife", product: "Groove speaker", customer: "Farhan Q.", phone: "93xxxxxx11", city: "Lucknow", pincode: "226010", payment: "COD", amount: 1799, vendor: "D2C Main Warehouse", lane: "READY", courier: "Blue Dart", awb: "77280550401", note: "Pickup 4–6 pm · awaiting confirmation", noteTone: "amber", owner: "OE", ownerName: "Ops Executive", weightKg: 1.1, dims: "20×20×15", placedAt: "13 Nov" },
+
+  { id: "18900", brand: "Swarg Homes", brandSlug: "swarg-homes", product: "Cushion covers (5)", customer: "Meera I.", phone: "96xxxxxx72", city: "Surat", pincode: "395007", payment: "Prepaid", amount: 899, vendor: "Laxmi Imitation", lane: "MOVING", courier: "Delhivery", awb: "14905527310984", note: "Picked up 12:40 pm", noteTone: "blue", owner: "OE", ownerName: "Ops Executive", weightKg: 0.9, dims: "30×30×8", placedAt: "13 Nov" },
+
+  { id: "18899", brand: "Hungama HiLife", brandSlug: "hilife", product: "G1 smartwatch", customer: "Imran A.", phone: "96xxxxxx02", city: "Hyderabad", pincode: "500081", payment: "COD", amount: 1099, vendor: "Star India", lane: "MOVING", courier: "Delhivery", awb: "14905527310946", note: "Hyderabad hub · arrives tomorrow", noteTone: "blue", owner: "SE", ownerName: "Support Executive", weightKg: 0.3, dims: "12×10×8", placedAt: "12 Nov" },
+  { id: "18896", brand: "Kasrat", brandSlug: "kasrat", product: "Resistance bands", customer: "Rohit G.", phone: "91xxxxxx45", city: "Guwahati", pincode: "781006", payment: "COD", amount: 749, vendor: "D2C Main Warehouse", lane: "MOVING", courier: "Shadowfax", awb: "SF2049381172", note: "Kolkata hub · special zone, 2 more days", noteTone: "blue", owner: "OE", ownerName: "Ops Executive", weightKg: 0.6, dims: "20×15×8", placedAt: "11 Nov" },
+
+  { id: "18893", brand: "Luxura Sciences", brandSlug: "luxura", product: "Vitamin C serum", customer: "Ritu D.", phone: "98xxxxxx90", city: "Kolkata", pincode: "700091", payment: "Prepaid", amount: 999, vendor: "D2C Main Warehouse", lane: "OUT_TODAY", courier: "Xpressbees", awb: "14160093820388", note: "Out for delivery · customer notified", noteTone: "green", owner: "SE", ownerName: "Support Executive", weightKg: 0.2, dims: "10×10×10", placedAt: "10 Nov" },
+
+  { id: "18890", brand: "AccessHer", brandSlug: "accessher", product: "Necklace set", customer: "Kavita R.", phone: "99xxxxxx26", city: "Jaipur", pincode: "302017", payment: "COD", amount: 1899, vendor: "Star India", lane: "DELIVERED", courier: "Delhivery", awb: "14905527310902", note: "Delivered 11:20 am · rated 5★", noteTone: "green", owner: "SE", ownerName: "Support Executive", weightKg: 0.4, dims: "15×12×6", placedAt: "09 Nov" },
 ];
 
-export const CONTROL_TOWER_KPIS = [
-  { label: "Pickups today", value: "9 / 14", sub: "done / due", tone: "orange" as Tone },
-  { label: "In transit", value: "7", sub: "2 out for delivery", tone: "blue" as Tone },
-  { label: "Delivered today", value: "18", sub: "96% on time", tone: "green" as Tone },
-  { label: "Needs attention", value: "3", sub: "1 NDR · 2 stuck", tone: "amber" as Tone },
-  { label: "Open red flags", value: "4", sub: "2 critical", tone: "red" as Tone },
-  { label: "COD pending", value: "₹48,320", sub: "62 orders", tone: "grey" as Tone },
-];
+export const LANE_TOTALS: Record<Lane, number> = {
+  PROBLEM: 3,
+  TO_PACK: 13,
+  READY: 4,
+  PICKED: 0,
+  MOVING: 13,
+  OUT_TODAY: 2,
+  DELIVERED: 18,
+};
 
-export type RedFlagItem = {
+// ---------- Today ----------
+
+export type NeedsYou = {
   id: string;
   severity: "critical" | "warning";
   title: string;
   detail: string;
-  owner: string;
-  age: string;
-  escalation: string;
+  due: string;
+  action: string;
+  href: string;
 };
 
-export const RED_FLAGS: RedFlagItem[] = [
-  { id: "f1", severity: "critical", title: "Pickup slot missed · Star India", detail: "Xpressbees · 10–12 am slot · 6 parcels · 2nd miss", owner: "Ops Executive", age: "2 h", escalation: "Escalated to Ops Manager" },
-  { id: "f2", severity: "critical", title: "No scan for 52 hours · AWB FMPC3301847219", detail: "Ekart · Kochi · last seen at origin hub", owner: "Ops Executive", age: "4 h", escalation: "RCA request drafted" },
-  { id: "f3", severity: "warning", title: "NDR not actioned · Order 18886", detail: "Blue Dart · customer not available · reattempt link sent", owner: "Support Executive", age: "19 h", escalation: "Due in 5 h" },
-  { id: "f4", severity: "warning", title: "Customer waiting for reply · Order 18899", detail: "“When will my HiLife smartwatch arrive?”", owner: "Support Executive", age: "1 h 40 m", escalation: "Due in 20 m" },
+export const NEEDS_YOU: NeedsYou[] = [
+  { id: "n1", severity: "critical", title: "Star India pickup missed twice", detail: "Xpressbees, 10–12 am · 6 parcels", due: "Escalated", action: "Move to Delhivery", href: "/shipments" },
+  { id: "n2", severity: "critical", title: "No scan for 52 hours", detail: "#18897 · Luxura · Ekart, Kochi", due: "RCA sent", action: "See shipment", href: "/shipments" },
+  { id: "n3", severity: "warning", title: "Customer chose a new delivery day", detail: "#18886 · Kasrat · Blue Dart", due: "Due in 5 h", action: "Confirm reattempt", href: "/shipments" },
+  { id: "n4", severity: "warning", title: "Customer waiting for a reply", detail: "#18899 · “When will my HiLife smartwatch arrive?”", due: "Due in 20 m", action: "Reply", href: "/shipments" },
 ];
 
-export type PickupRow = {
+export type SlotStatus = "done" | "confirmed" | "waiting" | "missed" | "scheduled";
+
+export const PICKUP_TIMELINE: {
   vendor: string;
-  cluster: string;
-  courier: string;
-  slot: string;
-  parcels: number;
-  status: string;
-  tone: Tone;
-};
-
-export const TODAY_PICKUPS: PickupRow[] = [
-  { vendor: "Star India", cluster: "Malad", courier: "Xpressbees", slot: "10–12 am", parcels: 6, status: "Missed · moved to Delhivery 2–4 pm", tone: "red" },
-  { vendor: "Laxmi Imitation", cluster: "Malad", courier: "Delhivery", slot: "12–2 pm", parcels: 4, status: "Picked up", tone: "green" },
-  { vendor: "Mundi (Apex Enterprise)", cluster: "Malad", courier: "Xpressbees", slot: "2–4 pm", parcels: 3, status: "Confirmed · executive assigned", tone: "blue" },
-  { vendor: "Reemm Creations", cluster: "Kandivali", courier: "Shadowfax", slot: "2–4 pm", parcels: 2, status: "Awaiting courier confirmation", tone: "amber" },
-  { vendor: "D2C Main Warehouse", cluster: "Noida", courier: "Blue Dart", slot: "4–6 pm", parcels: 11, status: "Scheduled", tone: "grey" },
+  area: string;
+  slots: { start: number; end: number; courier: string; parcels: number; status: SlotStatus; label: string }[];
+}[] = [
+  { vendor: "Star India", area: "Malad", slots: [
+    { start: 10, end: 12, courier: "Xpressbees", parcels: 6, status: "missed", label: "Missed" },
+    { start: 14, end: 16, courier: "Delhivery", parcels: 6, status: "confirmed", label: "Moved to Delhivery" },
+  ] },
+  { vendor: "Laxmi Imitation", area: "Malad", slots: [{ start: 12, end: 14, courier: "Delhivery", parcels: 4, status: "done", label: "Picked up" }] },
+  { vendor: "Mundi (Apex)", area: "Malad", slots: [{ start: 14, end: 16, courier: "Xpressbees", parcels: 3, status: "confirmed", label: "Confirmed" }] },
+  { vendor: "Reemm Creations", area: "Kandivali", slots: [{ start: 14, end: 16, courier: "Shadowfax", parcels: 2, status: "waiting", label: "Awaiting confirmation" }] },
+  { vendor: "D2C Main Warehouse", area: "Noida", slots: [
+    { start: 10, end: 12, courier: "Blue Dart", parcels: 8, status: "done", label: "Picked up" },
+    { start: 16, end: 18, courier: "Blue Dart", parcels: 11, status: "scheduled", label: "Scheduled" },
+  ] },
 ];
 
-export const COURIER_SCORES = [
-  { courier: "Delhivery", pickupOnTime: 96, deliveredOnTime: 93, rto: 4 },
-  { courier: "Blue Dart", pickupOnTime: 94, deliveredOnTime: 95, rto: 3 },
-  { courier: "Shadowfax", pickupOnTime: 91, deliveredOnTime: 90, rto: 6 },
-  { courier: "Ekart", pickupOnTime: 88, deliveredOnTime: 87, rto: 7 },
-  { courier: "Xpressbees", pickupOnTime: 72, deliveredOnTime: 89, rto: 5 },
+/** "Now" on the sample day, in hours (13:30). */
+export const NOW_HOUR = 13.5;
+
+export const PULSE = [
+  { label: "Moving now", value: "15", tone: "blue" as Tone },
+  { label: "Out today", value: "2", tone: "green" as Tone },
+  { label: "Delivered today", value: "18", tone: "green" as Tone },
+  { label: "COD pending", value: "₹48,320", tone: "grey" as Tone },
 ];
-
-export const WAREHOUSES = [
-  { code: "D2CNOI", name: "D2C Main Warehouse", pincode: "201309" },
-  { code: "WHFQFV", name: "Star India", pincode: "400097" },
-  { code: "WHUY73", name: "Laxmi Imitation", pincode: "400064" },
-  { code: "WHZAE7", name: "Mundi (Apex Enterprise)", pincode: "400064" },
-  { code: "WHTO34", name: "Reemm Creations", pincode: "400101" },
-];
-
-export const PICKUP_SLOTS = ["10–12 am", "12–2 pm", "2–4 pm", "4–6 pm"];
-
-export const formatINR = (n: number) =>
-  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(n);
 
 export const BRANDS_TODAY = [
   { slug: "accessher", name: "AccessHer", orders: 42, shipped: 31 },
@@ -123,4 +135,14 @@ export const BRANDS_TODAY = [
   { slug: "kasrat", name: "Kasrat", orders: 11, shipped: 9 },
   { slug: "luxura", name: "Luxura Sciences", orders: 9, shipped: 7 },
   { slug: "accesshim", name: "AccessHim", orders: 8, shipped: 8 },
+];
+
+// ---------- Booking ----------
+
+export const WAREHOUSES = [
+  { code: "D2CNOI", name: "D2C Main Warehouse", pincode: "201309" },
+  { code: "WHFQFV", name: "Star India", pincode: "400097" },
+  { code: "WHUY73", name: "Laxmi Imitation", pincode: "400064" },
+  { code: "WHZAE7", name: "Mundi (Apex Enterprise)", pincode: "400064" },
+  { code: "WHTO34", name: "Reemm Creations", pincode: "400101" },
 ];

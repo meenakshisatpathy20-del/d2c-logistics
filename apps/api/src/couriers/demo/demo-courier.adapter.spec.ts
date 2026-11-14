@@ -20,6 +20,12 @@ const base: RateRequest = {
 describe('zoneFor', () => {
   it('same first 3 digits is LOCAL', () => expect(zoneFor('400097', '400064')).toBe('LOCAL'));
   it('two metros is METRO', () => expect(zoneFor('400097', '110001')).toBe('METRO'));
+  it('within one metro area is LOCAL', () => {
+    expect(zoneFor('201309', '110017')).toBe('LOCAL'); // Noida to Delhi
+    expect(zoneFor('122001', '110017')).toBe('LOCAL'); // Gurgaon to Delhi
+    expect(zoneFor('400097', '401107')).toBe('LOCAL'); // Mumbai to Mira-Bhayandar
+  });
+  it('Noida to Mumbai is METRO, not NATIONAL', () => expect(zoneFor('201309', '400097')).toBe('METRO'));
   it('same postal region is REGIONAL', () => expect(zoneFor('400097', '431001')).toBe('REGIONAL'));
   it('different regions is NATIONAL', () => expect(zoneFor('400097', '751001')).toBe('NATIONAL'));
   it('North East is SPECIAL', () => {
@@ -41,7 +47,15 @@ describe('chargedWeightGrams', () => {
 describe('DemoCourierAdapter.quote', () => {
   it('prices a local 500 g prepaid parcel at the base freight', () => {
     const q = delhivery.quote(base);
-    expect(q).toMatchObject({ zone: 'LOCAL', chargedWeightGrams: 500, freight: 40, codCharge: 0, total: 40, etaDays: 1 });
+    expect(q).toMatchObject({
+      zone: 'LOCAL',
+      chargedWeightGrams: 500,
+      freight: 40,
+      codCharge: 0,
+      total: 40,
+      etaDays: 1,
+      pickupOnTimePct: 96,
+    });
   });
 
   it('charges the higher of fixed or percentage COD fee', () => {
@@ -109,5 +123,29 @@ describe('CouriersService.compareRates', () => {
       if (cur.total === prev.total) expect(cur.etaDays).toBeGreaterThanOrEqual(prev.etaDays);
     }
     expect(serviceable[0].courierCode).toBe('XPRESSBEES');
+  });
+
+  it('never recommends a courier with unreliable pickups when a reliable one is available', async () => {
+    const { CouriersService, RELIABLE_PICKUP_PCT } = await import('../couriers.service.js');
+    const quotes = new CouriersService().compareRates({
+      originPincode: '400097',
+      destinationPincode: '110017',
+      weightGrams: 900,
+      lengthCm: 20,
+      breadthCm: 15,
+      heightCm: 8,
+      paymentMode: 'COD',
+      codAmount: 1499,
+    });
+    const recommended = quotes.filter((q) => q.recommended);
+    expect(recommended).toHaveLength(1);
+    expect(recommended[0].serviceable).toBe(true);
+    expect(recommended[0].pickupOnTimePct).toBeGreaterThanOrEqual(RELIABLE_PICKUP_PCT);
+    // Xpressbees is cheapest here but misses pickups (72%), so it is not the recommendation.
+    expect(recommended[0].courierCode).not.toBe('XPRESSBEES');
+    const cheaperReliable = quotes.filter(
+      (q) => q.serviceable && q.pickupOnTimePct >= RELIABLE_PICKUP_PCT && q.total < recommended[0].total,
+    );
+    expect(cheaperReliable).toHaveLength(0);
   });
 });

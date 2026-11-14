@@ -1,136 +1,136 @@
 "use client";
 
 import clsx from "clsx";
-import {
-  Bell,
-  Boxes,
-  CircleDollarSign,
-  ClipboardList,
-  LayoutDashboard,
-  MessageSquareText,
-  PackagePlus,
-  RotateCcw,
-  Search,
-  Settings,
-  Store,
-  Truck,
-  UsersRound,
-} from "lucide-react";
+import { Bell, ChartNoAxesColumn, Handshake, Inbox, Plus, Sun, Waypoints } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useState } from "react";
+import { BookingPanel } from "@/components/booking/booking-panel";
 import { Logo } from "@/components/ui/logo";
 
 const NAV = [
-  { href: "/", label: "Control Tower", icon: LayoutDashboard },
-  { href: "/orders", label: "Orders", icon: Boxes },
-  { href: "/orders/new", label: "Book shipment", icon: PackagePlus },
-  { href: "/pickups", label: "Pickups", icon: Truck },
-  { href: "/ownership", label: "Ownership Board", icon: ClipboardList },
-  { href: "/chats", label: "Customer chats", icon: MessageSquareText },
-  { href: "/returns", label: "Returns & RTO", icon: RotateCcw },
-  { href: "/finance", label: "Finance", icon: CircleDollarSign },
-  { href: "/vendors", label: "Vendors", icon: Store },
-  { href: "/team", label: "Team", icon: UsersRound },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/", label: "Today", icon: Sun, ready: true },
+  { href: "/shipments", label: "Shipments", icon: Waypoints, ready: true },
+  { href: "/inbox", label: "Inbox", icon: Inbox, ready: false, count: 4 },
+  { href: "/partners", label: "Partners", icon: Handshake, ready: false },
+  { href: "/insights", label: "Insights", icon: ChartNoAxesColumn, ready: false },
 ];
 
-/** Screens approved and built so far; the rest show as "Soon". */
-const READY = new Set(["/", "/orders", "/orders/new"]);
+type ShellActions = { openBooking: () => void };
+const ShellContext = createContext<ShellActions>({ openBooking: () => {} });
+export const useShell = () => useContext(ShellContext);
 
 function isActive(pathname: string, href: string) {
-  if (href === "/") return pathname === "/";
-  if (href === "/orders") return pathname === "/orders";
-  return pathname.startsWith(href);
+  return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const [booking, setBooking] = useState(false);
+  const openBooking = useCallback(() => setBooking(true), []);
 
   return (
-    <div className="flex min-h-screen">
-      <div className="hidden w-60 shrink-0 border-r border-line bg-white lg:block">
-      <aside className="sticky top-0 flex h-screen flex-col">
-        <div className="px-5 pb-6 pt-5">
-          <Logo />
-        </div>
-        <nav className="flex-1 space-y-0.5 px-3" aria-label="Main">
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const active = isActive(pathname, href);
-            const ready = READY.has(href);
-            return (
-              <Link
-                key={href}
-                href={ready ? href : "#"}
-                aria-current={active ? "page" : undefined}
-                aria-disabled={!ready}
-                className={clsx(
-                  "group flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-colors duration-150",
-                  active ? "bg-brand-orange-soft text-brand-orange-dark" : "text-ink-2 hover:bg-page hover:text-ink",
-                  !ready && "pointer-events-none",
-                )}
-              >
-                <Icon size={17} className={active ? "text-brand-orange" : "text-muted"} />
-                <span className="flex-1">{label}</span>
-                {!ready ? <span className="text-[10px] uppercase tracking-wide text-faint">Soon</span> : null}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="m-3 rounded-xl border border-brand-amber/30 bg-brand-amber-soft p-3.5">
-          <div className="text-[12px] font-semibold text-ink">Couriers in demo mode</div>
-          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-2">
-            8 couriers connected. Each switches to live when its account is ready.
-          </p>
-        </div>
-      </aside>
-      </div>
+    <ShellContext.Provider value={{ openBooking }}>
+      <div className="min-h-screen pb-20 md:pb-0">
+        <header className="sticky top-0 z-30 border-b border-line bg-white/90 backdrop-blur">
+          <div className="mx-auto flex h-16 max-w-[1440px] items-center gap-4 px-4 sm:px-6">
+            <Link href="/" aria-label="Today" className="shrink-0">
+              <Logo compact />
+            </Link>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b border-line bg-white/90 px-4 backdrop-blur sm:px-6">
-          <div className="lg:hidden">
-            <Logo />
-          </div>
-          <div className="relative hidden max-w-md flex-1 sm:block">
-            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-            <input
-              placeholder="Search AWB, order ID, customer or phone"
-              className="h-10 w-full rounded-lg border border-line bg-page pl-9 pr-3 text-sm placeholder:text-faint focus:border-brand-blue focus:bg-white focus:outline-none"
-            />
-          </div>
-          <div className="ml-auto flex items-center gap-3">
+            <nav aria-label="Main" className="ml-4 hidden items-center gap-1 md:flex">
+              {NAV.map(({ href, label, icon: Icon, ready, count }) => {
+                const active = isActive(pathname, href);
+                return (
+                  <Link
+                    key={href}
+                    href={ready ? href : pathname}
+                    aria-current={active ? "page" : undefined}
+                    aria-disabled={!ready}
+                    title={ready ? undefined : "Coming next"}
+                    className={clsx(
+                      "relative flex items-center gap-2 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-colors",
+                      active ? "text-navy" : ready ? "text-muted hover:bg-page hover:text-ink" : "text-faint",
+                    )}
+                  >
+                    <Icon size={16} className={active ? "text-brand-orange" : undefined} />
+                    {label}
+                    {count ? (
+                      <span className="grid min-w-4 place-items-center rounded-full bg-flag-red px-1 text-[10px] font-bold text-white">
+                        {count}
+                      </span>
+                    ) : null}
+                    {active ? <span className="absolute inset-x-3 -bottom-[13px] h-0.5 rounded-full bg-brand-orange" /> : null}
+                  </Link>
+                );
+              })}
+            </nav>
+
             <button
-              className="relative grid size-10 place-items-center rounded-lg text-ink-2 hover:bg-page"
-              aria-label="4 open red flags"
+              onClick={openBooking}
+              className="ml-auto hidden h-10 items-center gap-2 rounded-xl bg-brand-orange px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-orange-dark sm:flex"
             >
-              <Bell size={18} />
-              <span className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded-full bg-flag-red text-[10px] font-bold text-white">
-                4
-              </span>
+              <Plus size={17} /> New shipment
             </button>
-            <div className="flex items-center gap-2.5">
-              <div className="grid size-9 place-items-center rounded-full bg-brand-blue text-[13px] font-semibold text-white">
-                OM
-              </div>
-              <div className="hidden leading-tight sm:block">
-                <div className="text-[13px] font-semibold">Ops Manager</div>
-                <div className="text-[11.5px] text-muted">D2C Ecommerce India</div>
-              </div>
+
+            <button className="relative ml-auto grid size-10 place-items-center rounded-xl text-ink-2 hover:bg-page sm:ml-0" aria-label="4 alerts">
+              <Bell size={18} />
+              <span className="absolute right-2 top-2 size-2 rounded-full bg-flag-red ring-2 ring-white" />
+            </button>
+            <div
+              className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-blue text-[12.5px] font-semibold text-white"
+              title="Ops Manager · D2C Ecommerce India"
+            >
+              OM
             </div>
           </div>
         </header>
-        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+
+        <main className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:py-8">{children}</main>
+
+        {/* Phone: bottom tabs with a centre "new" button */}
+        <nav
+          aria-label="Main"
+          className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-white pb-[env(safe-area-inset-bottom)] md:hidden"
+        >
+          {NAV.slice(0, 2).map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={clsx(
+                "flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium",
+                isActive(pathname, href) ? "text-brand-orange" : "text-muted",
+              )}
+            >
+              <Icon size={20} />
+              {label}
+            </Link>
+          ))}
+          <button onClick={openBooking} className="flex flex-col items-center justify-center" aria-label="New shipment">
+            <span className="-mt-6 grid size-12 place-items-center rounded-2xl bg-brand-orange text-white shadow-lg">
+              <Plus size={22} />
+            </span>
+          </button>
+          {NAV.slice(2, 4).map(({ href, label, icon: Icon }) => (
+            <span key={href} className="flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium text-faint">
+              <Icon size={20} />
+              {label}
+            </span>
+          ))}
+        </nav>
+
+        <BookingPanel open={booking} onClose={() => setBooking(false)} />
       </div>
-    </div>
+    </ShellContext.Provider>
   );
 }
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="font-display text-[26px] font-bold tracking-tight text-navy">{title}</h1>
-        {subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}
+        <h1 className="font-display text-[28px] font-bold tracking-tight text-navy">{title}</h1>
+        {subtitle ? <p className="mt-1 text-[14.5px] text-muted">{subtitle}</p> : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </div>

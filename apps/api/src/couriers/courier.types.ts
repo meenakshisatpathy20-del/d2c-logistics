@@ -34,12 +34,22 @@ export interface RateQuote {
   codCharge: number;
   total: number;
   etaDays: number;
+  /** Share of pickups done in the agreed slot, from the courier scorecard. */
+  pickupOnTimePct: number;
+  /** Set by the comparison: the cheapest reliable courier for this parcel. */
+  recommended: boolean;
 }
 
 export interface BookingRequest extends RateRequest {
   idempotencyKey: string;
   orderNumber: string;
 }
+
+export const BookingRequestSchema = RateRequestSchema.extend({
+  orderNumber: z.string().trim().min(1, 'Order number is required').max(40),
+  // The same key always returns the same AWB, so a double-click never books twice.
+  idempotencyKey: z.string().trim().min(8).max(100),
+});
 
 export interface BookingResult {
   awb: string;

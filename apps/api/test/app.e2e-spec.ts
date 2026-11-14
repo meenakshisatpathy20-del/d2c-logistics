@@ -49,6 +49,38 @@ describe('API (e2e)', () => {
       .expect(400);
   });
 
+  const booking = {
+    originPincode: '400097',
+    destinationPincode: '110017',
+    weightGrams: 900,
+    lengthCm: 20,
+    breadthCm: 15,
+    heightCm: 8,
+    paymentMode: 'COD',
+    codAmount: 1499,
+    orderNumber: '18906',
+    idempotencyKey: 'order-18906-attempt-1',
+  };
+
+  it('POST /api/couriers/:code/book returns an AWB, and the same key returns the same AWB', async () => {
+    const first = await request(app.getHttpServer()).post('/api/couriers/ekart/book').send(booking).expect(201);
+    expect(first.body).toMatchObject({ courierCode: 'EKART', mode: 'DEMO' });
+    expect(first.body.awb).toMatch(/^FMPC/);
+    const again = await request(app.getHttpServer()).post('/api/couriers/ekart/book').send(booking).expect(201);
+    expect(again.body.awb).toBe(first.body.awb);
+  });
+
+  it('POST /api/couriers/:code/book refuses a courier that does not deliver there', () => {
+    return request(app.getHttpServer()).post('/api/couriers/blitz/book').send(booking).expect(400);
+  });
+
+  it('POST /api/couriers/:code/book refuses a missing order number', () => {
+    return request(app.getHttpServer())
+      .post('/api/couriers/ekart/book')
+      .send({ ...booking, orderNumber: '' })
+      .expect(400);
+  });
+
   it('POST /api/couriers/rates returns quotes, cheapest serviceable first', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/couriers/rates')
