@@ -27,6 +27,17 @@ cd ../web && pnpm dev           # Website on http://localhost:3000
 
 Copy `apps/api/.env.example` to `apps/api/.env` first.
 
+## Deploy (Render)
+
+One web service runs both the website and the API: the website forwards `/api/*` to the API.
+
+- Build command: `pnpm install --frozen-lockfile && pnpm run build`
+- Start command: `pnpm start` (applies database migrations, loads demo data, starts both apps)
+- Environment: `DATABASE_URL` (Render PostgreSQL), `NODE_VERSION=22`, `TZ=Asia/Kolkata`
+- Health check: `/api/health`
+
+`render.yaml` sets all of this up in one step (Render → New → Blueprint). Every push to `main` redeploys automatically.
+
 ## Checks
 
 ```bash

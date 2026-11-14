@@ -1,4 +1,5 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+/** Empty means "same address as the website", which forwards /api to the API. */
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export type RateQuote = {
   courierCode: string;

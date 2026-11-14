@@ -5,9 +5,13 @@
   "scripts": {
     "dev:web": "pnpm --filter web dev",
     "dev:api": "pnpm --filter api start:dev",
-    "build": "pnpm -r build",
+    "build": "pnpm --filter api build && pnpm --filter web build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r --if-present test",
-    "db:up": "docker compose up -d postgres redis"
+    "db:up": "docker compose up -d postgres redis",
+    "start": "pnpm --filter api exec prisma migrate deploy && pnpm --filter api exec prisma db seed && (API_PORT=4000 pnpm --filter api start:prod & pnpm --filter web start)"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
