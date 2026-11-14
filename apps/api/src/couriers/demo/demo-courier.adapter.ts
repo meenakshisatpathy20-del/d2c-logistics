@@ -104,7 +104,11 @@ export class DemoCourierAdapter implements CourierAdapter {
   ): Promise<TrackingScan[]> {
     const roll = Number(hashNumber(awb) % 100n);
     const t0 = bookedAt.getTime();
-    const deliverAt = t0 + (etaDays + 1) * DAY - 4 * HOUR;
+    // All plan times are offsets from t0 (booking time).
+    const deliverAt = (etaDays + 1) * DAY - 4 * HOUR;
+    // The parcel reaches the destination hub half a day before delivery
+    // (never before it has left the origin hub).
+    const destHubAt = Math.max(31 * HOUR, deliverAt - 12 * HOUR);
     const origin = 'Origin hub';
     const dest = 'Destination hub';
 
@@ -118,7 +122,11 @@ export class DemoCourierAdapter implements CourierAdapter {
     if (roll >= 83 && roll < 90) {
       // Stuck: no further scans after leaving the origin hub.
     } else {
-      plan.push([2 * DAY + 6 * HOUR, 'IN_TRANSIT', dest, 'Arrived at destination hub']);
+      // Long journeys get a scan at each transit hub, about every 20 hours.
+      for (let t = 30 * HOUR + 20 * HOUR; t < destHubAt - 4 * HOUR; t += 20 * HOUR) {
+        plan.push([t, 'IN_TRANSIT', 'Transit hub', 'In transit']);
+      }
+      plan.push([destHubAt, 'IN_TRANSIT', dest, 'Arrived at destination hub']);
       plan.push([deliverAt - 6 * HOUR, 'OUT_FOR_DELIVERY', dest, 'Out for delivery']);
       if (roll < 75) {
         plan.push([deliverAt, 'DELIVERED', dest, 'Delivered to customer']);

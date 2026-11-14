@@ -94,6 +94,42 @@ describe('DemoCourierAdapter.track', () => {
     expect(early.map((s) => s.status)).toEqual(['BOOKED', 'PICKUP_SCHEDULED']);
   });
 
+  it('every parcel reaches an end state: delivered, failed then delivered, returned, or stuck', async () => {
+    const outcomes = new Map<string, number>();
+    for (let i = 0; i < 200; i++) {
+      for (const eta of [1, 3, 6]) {
+        const scans = await delhivery.track(`AWB-${i}`, bookedAt, eta, new Date('2026-12-31T00:00:00Z'));
+        const lastStatus = scans.at(-1)!.status;
+        expect(['DELIVERED', 'RTO_DELIVERED', 'IN_TRANSIT']).toContain(lastStatus);
+        if (lastStatus === 'IN_TRANSIT') {
+          // Only a stuck parcel stops in transit, and it never reaches the destination hub.
+          expect(scans.some((s) => s.remark === 'Arrived at destination hub')).toBe(false);
+        }
+        outcomes.set(lastStatus, (outcomes.get(lastStatus) ?? 0) + 1);
+        for (let k = 1; k < scans.length; k++) {
+          expect(scans[k].occurredAt.getTime()).toBeGreaterThan(scans[k - 1].occurredAt.getTime());
+          // A moving parcel is scanned at least every 24 hours, so the 48-hour
+          // "no scan" flag only fires for parcels that are really stuck.
+          if (scans[k].status === 'IN_TRANSIT' && scans[k - 1].status === 'IN_TRANSIT') {
+            expect(scans[k].occurredAt.getTime() - scans[k - 1].occurredAt.getTime()).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+          }
+        }
+      }
+    }
+    // Most parcels are delivered; a few get stuck or returned.
+    expect(outcomes.get('DELIVERED')!).toBeGreaterThan(400);
+    expect(outcomes.get('RTO_DELIVERED')!).toBeGreaterThan(0);
+    expect(outcomes.get('IN_TRANSIT')!).toBeGreaterThan(0);
+  });
+
+  it('delivers on the expected day', async () => {
+    const scans = await delhivery.track('AWB-ON-TIME', bookedAt, 3, new Date('2026-12-31T00:00:00Z'));
+    const delivered = scans.find((s) => s.status === 'DELIVERED' || s.status === 'NDR')!;
+    const days = (delivered.occurredAt.getTime() - bookedAt.getTime()) / (24 * 60 * 60 * 1000);
+    expect(days).toBeGreaterThan(3);
+    expect(days).toBeLessThan(4);
+  });
+
   it('always starts with BOOKED and lists scans in time order', async () => {
     const all = await delhivery.track('ANY-AWB', bookedAt, 3, new Date('2026-12-31T00:00:00Z'));
     expect(all[0].status).toBe('BOOKED');

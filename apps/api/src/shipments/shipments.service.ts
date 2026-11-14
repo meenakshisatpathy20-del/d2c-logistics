@@ -1,0 +1,296 @@
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BrandService } from '../common/brand.service.js';
+import { istDayStart, nextBookableSlot, slotLabel, slotWindow } from '../common/ist.js';
+import { CouriersService } from '../couriers/couriers.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import type { BookOrder, BulkBook } from './booking.schema.js';
+import { initials, laneFor } from './lanes.js';
+
+
+@Injectable()
+export class ShipmentsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly couriers: CouriersService,
+    private readonly brands: BrandService,
+  ) {}
+
+  /**
+   * Books one order: picks the courier, gets the AWB, and saves order,
+   * shipment, pickup and the first tracking event together.
+   * The same idempotency key always returns the same shipment.
+   */
+  async book(input: BookOrder, now: Date = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+
+    const repeat = await this.prisma.shipment.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+    if (repeat) return this.summary(repeat.id);
+
+    const existing = await this.prisma.order.findUnique({
+      where: { brandId_orderNumber: { brandId, orderNumber: input.orderNumber } },
+      include: { shipments: { where: { status: { not: 'CANCELLED' } } } },
+    });
+    if (existing?.shipments.length) {
+      throw new ConflictException(`Order #${input.orderNumber} is already booked (AWB ${existing.shipments[0].awb})`);
+    }
+
+    const warehouse = await this.prisma.warehouse.findUnique({
+      where: { brandId_code: { brandId, code: input.warehouseCode } },
+    });
+    if (!warehouse) throw new BadRequestException(`Unknown pickup warehouse ${input.warehouseCode}`);
+    const rto = input.rtoWarehouseCode
+      ? await this.prisma.warehouse.findUnique({ where: { brandId_code: { brandId, code: input.rtoWarehouseCode } } })
+      : null;
+    if (input.rtoWarehouseCode && !rto) throw new BadRequestException(`Unknown RTO warehouse ${input.rtoWarehouseCode}`);
+
+    const rateReq = {
+      originPincode: warehouse.pincode,
+      destinationPincode: input.pincode,
+      weightGrams: input.weightGrams,
+      lengthCm: input.lengthCm,
+      breadthCm: input.breadthCm,
+      heightCm: input.heightCm,
+      paymentMode: input.paymentMode,
+      codAmount: input.paymentMode === 'COD' ? input.codAmount : 0,
+    };
+    const quotes = this.couriers.compareRates(rateReq);
+    const quote = input.courierCode
+      ? quotes.find((q) => q.courierCode === input.courierCode)
+      : quotes.find((q) => q.recommended);
+    if (!quote) throw new BadRequestException(`Unknown courier ${input.courierCode}`);
+    if (!quote.serviceable) throw new BadRequestException(`${quote.courierName} does not deliver to pin code ${input.pincode}`);
+    if (input.paymentMode === 'COD' && !(input.codAmount > 0)) throw new BadRequestException('COD amount is required');
+
+    const { slotStart, slotEnd } = input.slot ? slotWindow(now, input.slot.day, input.slot.startHour) : nextBookableSlot(now);
+    if (slotStart.getTime() - now.getTime() < 2 * 60 * 60 * 1000) {
+      throw new BadRequestException('That pickup slot is too close for the courier to confirm. Pick a later slot.');
+    }
+
+    const adapter = this.couriers.get(quote.courierCode);
+    const booked = await adapter.book({ ...rateReq, orderNumber: input.orderNumber, idempotencyKey: input.idempotencyKey }, now);
+    const owner = await this.brands.ownerFor('OPS');
+
+    const shipment = await this.prisma.$transaction(async (tx) => {
+      const orderData = {
+        productBrand: input.productBrand,
+        status: 'READY_TO_SHIP' as const,
+        pickupWarehouseId: warehouse.id,
+        rtoWarehouseId: rto?.id ?? warehouse.id,
+        customerName: input.customerName,
+        customerPhone: input.customerPhone,
+        addressLine: input.addressLine,
+        city: input.city ?? '',
+        state: input.state ?? '',
+        pincode: input.pincode,
+        paymentMode: input.paymentMode,
+        orderValue: input.orderValue,
+        codAmount: input.paymentMode === 'COD' ? input.codAmount : 0,
+        weightGrams: input.weightGrams,
+        lengthCm: input.lengthCm,
+        breadthCm: input.breadthCm,
+        heightCm: input.heightCm,
+        items: [{ name: input.productName ?? 'Order items', qty: 1, price: input.orderValue }],
+      };
+      // An order that exists but was never booked is booked with the details entered now.
+      const order = await tx.order.upsert({
+        where: { brandId_orderNumber: { brandId, orderNumber: input.orderNumber } },
+        update: orderData,
+        create: { ...orderData, brandId, orderNumber: input.orderNumber, source: 'MANUAL', createdAt: now },
+      });
+      const pickup = await tx.pickup.upsert({
+        where: { warehouseId_courierCode_slotStart: { warehouseId: warehouse.id, courierCode: quote.courierCode, slotStart } },
+        update: { parcelCount: { increment: 1 } },
+        create: { brandId, warehouseId: warehouse.id, courierCode: quote.courierCode, slotStart, slotEnd, parcelCount: 1, createdAt: now },
+      });
+      const created = await tx.shipment.create({
+        data: {
+          brandId,
+          orderId: order.id,
+          courierCode: quote.courierCode,
+          awb: booked.awb,
+          isDemo: adapter.mode === 'DEMO',
+          status: 'BOOKED',
+          chargedAmount: booked.chargedAmount,
+          chargedWeightG: booked.chargedWeightGrams,
+          etaDays: quote.etaDays,
+          expectedDelivery: booked.expectedDelivery,
+          pickupId: pickup.id,
+          lastScanAt: now,
+          idempotencyKey: input.idempotencyKey,
+          createdAt: now,
+          events: { create: { status: 'BOOKED', location: warehouse.city, remark: `Booked with ${quote.courierName}`, occurredAt: now } },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          brandId,
+          actorId: owner?.id,
+          action: 'SHIPMENT_BOOKED',
+          entityType: 'Shipment',
+          entityId: created.id,
+          after: { awb: booked.awb, courier: quote.courierCode, slotStart: slotStart.toISOString(), charged: booked.chargedAmount },
+          createdAt: now,
+        },
+      });
+      return created;
+    });
+
+    return this.summary(shipment.id);
+  }
+
+  /** Books many orders; each row succeeds or fails on its own. */
+  async bulk(input: BulkBook, now: Date = new Date()) {
+    const results: Array<{ orderNumber: string; ok: boolean; awb?: string; courier?: string; error?: string }> = [];
+    for (const row of input.rows) {
+      try {
+        const s = await this.book({ ...row, idempotencyKey: `${input.batchKey}:${row.orderNumber}` }, now);
+        results.push({ orderNumber: row.orderNumber, ok: true, awb: s.awb, courier: s.courierName });
+      } catch (e) {
+        results.push({ orderNumber: row.orderNumber, ok: false, error: (e as Error).message });
+      }
+    }
+    return { booked: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
+  }
+
+  async summary(id: string) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { id },
+      include: { courier: true, pickup: true, order: true },
+    });
+    if (!s) throw new NotFoundException('Shipment not found');
+    return {
+      id: s.id,
+      orderNumber: s.order.orderNumber,
+      courierCode: s.courierCode,
+      courierName: s.courier.name,
+      mode: s.isDemo ? 'DEMO' : 'LIVE',
+      awb: s.awb,
+      chargedAmount: Number(s.chargedAmount),
+      chargedWeightGrams: s.chargedWeightG,
+      expectedDelivery: s.expectedDelivery,
+      pickupSlot: s.pickup ? { start: s.pickup.slotStart, end: s.pickup.slotEnd, label: slotLabel(s.pickup.slotStart) } : null,
+      labelUrl: `/api/shipments/${s.id}/label.pdf`,
+    };
+  }
+
+  /** Every shipment, plus orders not booked yet, as journey-board cards. */
+  async board() {
+    const brandId = await this.brands.currentBrandId();
+    const [shipments, unbooked] = await Promise.all([
+      this.prisma.shipment.findMany({
+        where: { brandId, status: { not: 'CANCELLED' } },
+        include: {
+          order: { include: { pickupWarehouse: true } },
+          courier: true,
+          pickup: true,
+          redFlags: { where: { resolvedAt: null }, include: { owner: true }, orderBy: { createdAt: 'desc' } },
+          events: { orderBy: { occurredAt: 'desc' }, take: 1 },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.order.findMany({
+        where: { brandId, shipments: { none: {} } },
+        include: { pickupWarehouse: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+    const pickupFlags = await this.prisma.redFlag.findMany({
+      where: { brandId, resolvedAt: null, pickupId: { not: null } },
+      include: { owner: true },
+    });
+
+    const cards = shipments.map((s) => {
+      const flag = s.redFlags[0] ?? pickupFlags.find((f) => f.pickupId === s.pickupId) ?? null;
+      const lane = laneFor({
+        status: s.status,
+        pickupStatus: s.pickup?.status,
+        openFlag: flag,
+        slotLabel: s.pickup ? slotLabel(s.pickup.slotStart) : null,
+        lastScanPlace: s.events[0]?.location,
+        courier: s.courier.name,
+      });
+      const owner = flag?.owner?.name ?? 'Ops Executive';
+      return {
+        id: s.id,
+        orderNumber: s.order.orderNumber,
+        brand: s.order.productBrand ?? 'D2C',
+        product: itemName(s.order.items),
+        customer: s.order.customerName,
+        phone: maskPhone(s.order.customerPhone),
+        city: s.order.city,
+        pincode: s.order.pincode,
+        payment: s.order.paymentMode === 'COD' ? 'COD' : 'Prepaid',
+        amount: Number(s.order.orderValue),
+        vendor: s.order.pickupWarehouse.name,
+        courier: s.courier.name,
+        awb: s.awb,
+        isDemo: s.isDemo,
+        status: s.status,
+        ...lane,
+        owner: initials(owner),
+        ownerName: owner,
+        labelUrl: `/api/shipments/${s.id}/label.pdf`,
+        createdAt: s.createdAt,
+      };
+    });
+    const pending = unbooked.map((o) => ({
+      id: `order-${o.id}`,
+      orderNumber: o.orderNumber,
+      brand: o.productBrand ?? 'D2C',
+      product: itemName(o.items),
+      customer: o.customerName,
+      phone: maskPhone(o.customerPhone),
+      city: o.city,
+      pincode: o.pincode,
+      payment: o.paymentMode === 'COD' ? 'COD' : 'Prepaid',
+      amount: Number(o.orderValue),
+      vendor: o.pickupWarehouse.name,
+      courier: null,
+      awb: null,
+      isDemo: false,
+      status: 'UNBOOKED',
+      ...laneFor({ status: 'UNBOOKED' }),
+      owner: 'OE',
+      ownerName: 'Ops Executive',
+      labelUrl: null,
+      createdAt: o.createdAt,
+    }));
+    return [...cards, ...pending];
+  }
+
+  async warehouses() {
+    const brandId = await this.brands.currentBrandId();
+    return this.prisma.warehouse.findMany({
+      where: { brandId },
+      select: { code: true, name: true, city: true, pincode: true, cluster: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  /** Orders created today (IST) vs. shipped, by our brand. */
+  async brandsToday(now: Date = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+    const orders = await this.prisma.order.findMany({
+      where: { brandId, createdAt: { gte: istDayStart(now) } },
+      include: { shipments: { select: { status: true } } },
+    });
+    const byBrand = new Map<string, { orders: number; shipped: number }>();
+    for (const o of orders) {
+      const key = o.productBrand ?? 'D2C';
+      const row = byBrand.get(key) ?? { orders: 0, shipped: 0 };
+      row.orders++;
+      if (o.shipments.some((s) => !['BOOKED', 'PICKUP_SCHEDULED', 'CANCELLED'].includes(s.status))) row.shipped++;
+      byBrand.set(key, row);
+    }
+    return [...byBrand.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.orders - a.orders);
+  }
+}
+
+function itemName(items: unknown): string {
+  const first = Array.isArray(items) ? (items[0] as { name?: string } | undefined) : undefined;
+  return first?.name ?? 'Order items';
+}
+
+function maskPhone(phone: string): string {
+  return phone.length === 10 ? `${phone.slice(0, 2)}xxxxxx${phone.slice(-2)}` : phone;
+}

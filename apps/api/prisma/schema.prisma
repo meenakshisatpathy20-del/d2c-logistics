@@ -55,7 +55,8 @@ model User {
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  ownedTasks Task[] @relation("TaskOwner")
+  ownedTasks Task[]    @relation("TaskOwner")
+  ownedFlags RedFlag[] @relation("FlagOwner")
 
   @@unique([brandId, phone])
 }
@@ -133,6 +134,7 @@ model Order {
   brandId           String
   brand             Brand       @relation(fields: [brandId], references: [id])
   orderNumber       String // order ID from OMS / store
+  productBrand      String? // our brand: AccessHer, Hungama HiLife, Kasrat...
   source            OrderSource @default(MANUAL)
   status            OrderStatus @default(NEW)
   pickupWarehouseId String
@@ -199,6 +201,7 @@ model Shipment {
   labelUrl         String?
   packingProofUrls String[]
   expectedDelivery DateTime?
+  etaDays          Int            @default(3)
   pickupId         String?
   pickup           Pickup?        @relation(fields: [pickupId], references: [id])
   lastScanAt       DateTime?
@@ -255,13 +258,17 @@ model Pickup {
   confirmedAt    DateTime?
   pickedUpAt     DateTime?
   missCount      Int          @default(0)
+  parcelCount    Int          @default(0) // parcels booked into this slot, kept after a move
+  movedToId      String? // set when the parcels moved to another pickup
   postponeReason String?
   missReason     String? // given by courier partner
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   shipments Shipment[]
+  redFlags  RedFlag[]
 
+  @@unique([warehouseId, courierCode, slotStart])
   @@index([brandId, slotStart])
 }
 
@@ -303,12 +310,20 @@ model RedFlag {
   brand      Brand        @relation(fields: [brandId], references: [id])
   shipmentId String?
   shipment   Shipment?    @relation(fields: [shipmentId], references: [id])
-  type       String // SLOT_MISSED, NO_SCAN_48H, NDR_NO_ACTION, CUSTOMER_UNANSWERED, TASK_OVERDUE
+  pickupId   String?
+  pickup     Pickup?      @relation(fields: [pickupId], references: [id])
+  type       String // PICKUP_UNCONFIRMED, PICKUP_MISSED, NO_SCAN_48H, NDR, RTO
   severity   FlagSeverity
+  title      String
   message    String
+  ownerId    String?
+  owner      User?        @relation("FlagOwner", fields: [ownerId], references: [id])
+  dueAt      DateTime?
+  action     String? // the one-tap fix shown in "Needs you"
   resolvedAt DateTime?
   createdAt  DateTime     @default(now())
 
+  @@unique([type, shipmentId, pickupId])
   @@index([brandId, resolvedAt])
 }
 

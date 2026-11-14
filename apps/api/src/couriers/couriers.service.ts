@@ -24,6 +24,19 @@ export class CouriersService {
     }));
   }
 
+  /** Pickup on-time % from the courier scorecard (demo values for now). */
+  pickupOnTimePct(code: string): number {
+    return DEMO_COURIERS.find((p) => p.code === code)?.pickupOnTimePct ?? 90;
+  }
+
+  /** The courier a missed or unconfirmed pickup moves to: the most reliable one. */
+  backupFor(code: string): string {
+    const ranked = [...DEMO_COURIERS]
+      .filter((p) => p.code !== code && p.zones.length > 1)
+      .sort((a, b) => b.pickupOnTimePct - a.pickupOnTimePct);
+    return ranked[0].code;
+  }
+
   get(code: string): CourierAdapter {
     const adapter = this.adapters.get(code);
     if (!adapter) throw new NotFoundException(`Unknown courier ${code}`);
