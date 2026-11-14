@@ -27,7 +27,7 @@ export function laneFor(s: LaneInput): { lane: Lane; note: string; tone: Tone } 
     case 'PICKED_UP':
       return { lane: 'MOVING', note: `Picked up by ${s.courier ?? 'courier'}`, tone: 'blue' };
     case 'IN_TRANSIT':
-      return { lane: 'MOVING', note: s.lastScanPlace ? `At ${s.lastScanPlace.toLowerCase()}` : 'On the way', tone: 'blue' };
+      return { lane: 'MOVING', note: s.lastScanPlace ? `At ${s.lastScanPlace}` : 'On the way', tone: 'blue' };
     case 'OUT_FOR_DELIVERY':
       return { lane: 'OUT_TODAY', note: 'Out for delivery · customer notified', tone: 'green' };
     case 'DELIVERED':

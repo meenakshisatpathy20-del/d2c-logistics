@@ -6,6 +6,7 @@
  */
 import 'dotenv/config';
 import { BrandService } from '../src/common/brand.service.js';
+import { codAdvanceFor } from '../src/common/cod-advance.js';
 import { istAt } from '../src/common/ist.js';
 import { CouriersService } from '../src/couriers/couriers.service.js';
 import { DEMO_COURIERS } from '../src/couriers/demo/profiles.js';
@@ -84,7 +85,9 @@ async function main() {
         pincode,
         paymentMode,
         orderValue: value,
-        codAmount: paymentMode === 'COD' ? value : 0,
+        codAmount: paymentMode === 'COD' ? value - codAdvanceFor(value) : 0,
+        codAdvance: paymentMode === 'COD' ? codAdvanceFor(value) : 0,
+        advanceStatus: paymentMode === 'COD' && codAdvanceFor(value) > 0 ? 'PAID' : null,
         weightGrams: 400 + i * 150,
         lengthCm: 20,
         breadthCm: 15,
@@ -184,7 +187,8 @@ async function demoHistory(brandId: string) {
           warehouseCode: pickupWarehouses[n % pickupWarehouses.length].code,
           paymentMode: cod ? 'COD' : 'PREPAID',
           orderValue: value,
-          codAmount: cod ? value : 0,
+          // D2C Mall asks for an advance on every COD order (Rs 49 / Rs 99).
+          codAdvance: cod ? codAdvanceFor(value) : 0,
           weightGrams: 300 + ((n * 173) % 2200),
           lengthCm: 20 + (n % 3) * 5,
           breadthCm: 15,

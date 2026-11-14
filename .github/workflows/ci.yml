@@ -19,6 +19,9 @@ jobs:
           --health-cmd "pg_isready -U d2c" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgresql://d2c:d2c@localhost:5432/d2c_logistics?schema=public
+      TZ: Asia/Kolkata
+      JOBS_ENABLED: "false"
+      SEED_DEMO_HISTORY: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -32,6 +35,7 @@ jobs:
         run: |
           pnpm exec prisma generate
           pnpm exec prisma migrate deploy
+          pnpm exec prisma db seed
       - name: API lint, tests, build
         working-directory: apps/api
         run: |

@@ -18,7 +18,10 @@ export const BookOrderSchema = z.object({
   rtoWarehouseCode: z.string().trim().optional(),
   paymentMode: z.enum(['PREPAID', 'COD']),
   orderValue: z.number().positive('Order value must be above 0'),
-  codAmount: z.number().nonnegative().default(0),
+  /** Ignored for safety: the server works out what the courier collects. */
+  codAmount: z.number().nonnegative().optional(),
+  /** Advance the customer already paid online for a COD order (Rs 49 / Rs 99 at D2C Mall). */
+  codAdvance: z.number().nonnegative().optional(),
   weightGrams: z.number().int().positive().max(50_000),
   lengthCm: z.number().int().positive().max(200),
   breadthCm: z.number().int().positive().max(200),

@@ -46,6 +46,11 @@ export class TodayService {
       }),
       this.shipments.brandsToday(now),
     ]);
+    const advances = await this.prisma.order.aggregate({
+      where: { brandId, advanceStatus: 'PAID' },
+      _sum: { codAdvance: true },
+      _count: true,
+    });
 
     const count = (...st: string[]) => active.filter((a) => st.includes(a.status)).reduce((n, a) => n + a._count, 0);
 
@@ -106,6 +111,8 @@ export class TodayService {
         deliveredToday,
         codToCollect: Number(codOpen._sum.codAmount ?? 0),
         codOrders: codOpen._count,
+        advancesHeld: Number(advances._sum.codAdvance ?? 0),
+        advanceOrders: advances._count,
       },
       brands,
     };

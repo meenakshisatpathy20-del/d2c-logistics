@@ -78,7 +78,14 @@ export class DocumentsService {
       .font('Helvetica-Bold')
       .fontSize(cod ? 15 : 13)
       .fillColor(cod ? '#E05400' : GREEN)
-      .text(cod ? `COLLECT ${rs(Number(o.codAmount))}` : 'PREPAID · DO NOT COLLECT', 14, payY + 13, { width: W - 28, align: 'center' });
+      .text(cod ? `COLLECT ${rs(Number(o.codAmount))}` : 'PREPAID · DO NOT COLLECT', 14, payY + (cod && Number(o.codAdvance) > 0 ? 8 : 13), { width: W - 28, align: 'center' });
+    if (cod && Number(o.codAdvance) > 0) {
+      doc
+        .font('Helvetica')
+        .fontSize(8)
+        .fillColor('#B54708')
+        .text(`Advance ${rs(Number(o.codAdvance))} paid online · order total ${rs(Number(o.orderValue))}`, 14, payY + 26, { width: W - 28, align: 'center' });
+    }
 
     doc.font('Helvetica').fontSize(8.5).fillColor(MUTED);
     doc.text(`Order #${o.orderNumber}${o.productBrand ? ` · ${o.productBrand}` : ''}`, 14, 328);
@@ -114,7 +121,7 @@ export class DocumentsService {
       40,
       94,
     );
-    doc.text(`${p.shipments.length} parcels${p.shipments.some((s) => s.isDemo) ? '  ·  DEMO courier' : ''}`, 40, 108);
+    doc.text(`${p.shipments.length} parcel${p.shipments.length === 1 ? '' : 's'}${p.shipments.some((s) => s.isDemo) ? '  ·  DEMO courier' : ''}`, 40, 108);
 
     const cols = [
       { h: '#', w: 24 },

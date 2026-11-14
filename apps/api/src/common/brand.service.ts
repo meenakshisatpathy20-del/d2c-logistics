@@ -25,10 +25,11 @@ export class BrandService {
     const brandId = await this.currentBrandId();
     const users = await this.prisma.user.findMany({
       where: { brandId, role, active: true },
+      include: { _count: { select: { reports: true } } },
       orderBy: { createdAt: 'asc' },
     });
-    // The first user under a manager does the work; managers get escalations.
-    const worker = users.find((u) => u.managerId) ?? users[0];
+    // The person who does the work has nobody reporting to them; their manager gets escalations.
+    const worker = users.find((u) => u._count.reports === 0) ?? users[0];
     return worker ? { id: worker.id, name: worker.name } : null;
   }
 }

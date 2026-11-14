@@ -150,18 +150,20 @@ model Order {
   state         String
   pincode       String
 
-  paymentMode  PaymentMode
-  orderValue   Decimal     @db.Decimal(12, 2)
-  codAmount    Decimal     @default(0) @db.Decimal(12, 2)
-  codConfirmed Boolean? // null = not asked yet
-  weightGrams  Int
-  lengthCm     Int
-  breadthCm    Int
-  heightCm     Int
-  items        Json // [{ name, sku, qty, price }]
-  rtoRisk      Int? // 0-100, rule-based first
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  paymentMode   PaymentMode
+  orderValue    Decimal     @db.Decimal(12, 2)
+  codAmount     Decimal     @default(0) @db.Decimal(12, 2)
+  codAdvance    Decimal     @default(0) @db.Decimal(12, 2) // paid online at checkout; the courier collects codAmount
+  advanceStatus String? // PAID, ADJUSTED, FORFEITED, REFUNDED
+  codConfirmed  Boolean? // null = not asked yet
+  weightGrams   Int
+  lengthCm      Int
+  breadthCm     Int
+  heightCm      Int
+  items         Json // [{ name, sku, qty, price }]
+  rtoRisk       Int? // 0-100, rule-based first
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   shipments Shipment[]
   messages  Message[]

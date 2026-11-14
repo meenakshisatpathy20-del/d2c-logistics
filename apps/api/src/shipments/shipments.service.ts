@@ -43,6 +43,12 @@ export class ShipmentsService {
       : null;
     if (input.rtoWarehouseCode && !rto) throw new BadRequestException(`Unknown RTO warehouse ${input.rtoWarehouseCode}`);
 
+    // COD with an advance: the courier collects only the balance.
+    const cod = input.paymentMode === 'COD';
+    const advance = cod ? (input.codAdvance ?? 0) : 0;
+    if (advance >= input.orderValue) throw new BadRequestException('The advance must be less than the order value');
+    const collect = cod ? Math.round((input.orderValue - advance) * 100) / 100 : 0;
+
     const rateReq = {
       originPincode: warehouse.pincode,
       destinationPincode: input.pincode,
@@ -51,7 +57,7 @@ export class ShipmentsService {
       breadthCm: input.breadthCm,
       heightCm: input.heightCm,
       paymentMode: input.paymentMode,
-      codAmount: input.paymentMode === 'COD' ? input.codAmount : 0,
+      codAmount: collect,
     };
     const quotes = this.couriers.compareRates(rateReq);
     const quote = input.courierCode
@@ -59,7 +65,6 @@ export class ShipmentsService {
       : quotes.find((q) => q.recommended);
     if (!quote) throw new BadRequestException(`Unknown courier ${input.courierCode}`);
     if (!quote.serviceable) throw new BadRequestException(`${quote.courierName} does not deliver to pin code ${input.pincode}`);
-    if (input.paymentMode === 'COD' && !(input.codAmount > 0)) throw new BadRequestException('COD amount is required');
 
     const { slotStart, slotEnd } = input.slot ? slotWindow(now, input.slot.day, input.slot.startHour) : nextBookableSlot(now);
     if (slotStart.getTime() - now.getTime() < 2 * 60 * 60 * 1000) {
@@ -84,7 +89,9 @@ export class ShipmentsService {
         pincode: input.pincode,
         paymentMode: input.paymentMode,
         orderValue: input.orderValue,
-        codAmount: input.paymentMode === 'COD' ? input.codAmount : 0,
+        codAmount: collect,
+        codAdvance: advance,
+        advanceStatus: advance > 0 ? 'PAID' : null,
         weightGrams: input.weightGrams,
         lengthCm: input.lengthCm,
         breadthCm: input.breadthCm,
@@ -221,6 +228,9 @@ export class ShipmentsService {
         pincode: s.order.pincode,
         payment: s.order.paymentMode === 'COD' ? 'COD' : 'Prepaid',
         amount: Number(s.order.orderValue),
+        collect: Number(s.order.codAmount),
+        advance: Number(s.order.codAdvance),
+        advanceStatus: s.order.advanceStatus,
         vendor: s.order.pickupWarehouse.name,
         courier: s.courier.name,
         awb: s.awb,
@@ -244,6 +254,9 @@ export class ShipmentsService {
       pincode: o.pincode,
       payment: o.paymentMode === 'COD' ? 'COD' : 'Prepaid',
       amount: Number(o.orderValue),
+      collect: Number(o.codAmount),
+      advance: Number(o.codAdvance),
+      advanceStatus: o.advanceStatus,
       vendor: o.pickupWarehouse.name,
       courier: null,
       awb: null,

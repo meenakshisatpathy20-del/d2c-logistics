@@ -1,24 +1,38 @@
 "use client";
 
 import clsx from "clsx";
-import { CheckCircle2, FileSpreadsheet, Loader2, Sparkles, UploadCloud, X, XCircle } from "lucide-react";
+import { CheckCircle2, FileSpreadsheet, FileText, Loader2, Sparkles, UploadCloud, X, XCircle } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { OUR_BRANDS } from "@/components/ui/logo";
 import { Badge, Button, DemoBadge, Field, inputClass } from "@/components/ui/primitives";
-import { bookShipment, type BookingResult, fetchRates, type RateQuote } from "@/lib/api";
-import { BULK_COLUMNS, type BulkRow, parseBulkCsv, SAMPLE_BULK_CSV } from "@/lib/bulk-csv";
+import {
+  announceShipmentsChanged,
+  bookOrder,
+  type BookedShipment,
+  type BulkResult,
+  bulkBook,
+  fetchRates,
+  getWarehouses,
+  type RateQuote,
+  type Warehouse,
+} from "@/lib/api";
+import { BULK_COLUMNS, type BulkRow, parseBulkCsv, SAMPLE_BULK_CSV, SAMPLE_BULK_CSV_CLEAN } from "@/lib/bulk-csv";
+import { codAdvanceFor } from "@/lib/cod-advance";
+import { formatINR } from "@/lib/format";
 import { slotOptions } from "@/lib/pickup-slots";
-import { formatINR, WAREHOUSES } from "@/lib/sample-data";
 
 export function BookingPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [mode, setMode] = useState<"single" | "bulk">("single");
+  const [warehouses, setWarehouses] = useState<Warehouse[] | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
+    if (!warehouses) getWarehouses().then(setWarehouses, () => setWarehouses([]));
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, warehouses]);
 
   return (
     <AnimatePresence>
@@ -71,7 +85,17 @@ export function BookingPanel({ open, onClose }: { open: boolean; onClose: () => 
                 <X size={18} />
               </button>
             </div>
-            {mode === "single" ? <SingleOrder /> : <BulkUpload />}
+            {!warehouses ? (
+              <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted">
+                <Loader2 size={16} className="animate-spin" /> Loading warehouses…
+              </div>
+            ) : warehouses.length === 0 ? (
+              <p className="p-8 text-sm text-flag-red">Couldn&apos;t load pickup warehouses. Check the connection and reopen.</p>
+            ) : mode === "single" ? (
+              <SingleOrder warehouses={warehouses} />
+            ) : (
+              <BulkUpload warehouses={warehouses} />
+            )}
           </motion.aside>
         </motion.div>
       ) : null}
@@ -95,18 +119,23 @@ function Step({ n, title, hint, children }: { n: number; title: string; hint?: R
 const isPhone = (v: string) => /^[6-9]\d{9}$/.test(v);
 const isPincode = (v: string) => /^[1-9]\d{5}$/.test(v);
 
-function SingleOrder() {
+function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
   const [orderNumber, setOrderNumber] = useState("");
+  const [productBrand, setProductBrand] = useState<string>(OUR_BRANDS[0].name);
+  const [productName, setProductName] = useState("");
   const [customer, setCustomer] = useState("");
   const [mobile, setMobile] = useState("");
   const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
   const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [warehouse, setWarehouse] = useState(WAREHOUSES[0].code);
+  const [warehouse, setWarehouse] = useState(warehouses[0].code);
   const [pincode, setPincode] = useState("");
   const [weight, setWeight] = useState("");
   const [dims, setDims] = useState({ l: "", b: "", h: "" });
   const [payment, setPayment] = useState<"PREPAID" | "COD">("COD");
-  const [codAmount, setCodAmount] = useState("");
+  const [orderValue, setOrderValue] = useState("");
+  // D2C Mall asks every COD customer for a small advance online; on by default.
+  const [advancePaid, setAdvancePaid] = useState(true);
   const [quotes, setQuotes] = useState<RateQuote[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -116,14 +145,16 @@ function SingleOrder() {
   const [slot, setSlot] = useState(() => slots[0].key);
   const [booking, setBooking] = useState(false);
   const [bookError, setBookError] = useState<string | null>(null);
-  const [booked, setBooked] = useState<BookingResult | null>(null);
-  // One key per form; a double-click or retry returns the same AWB instead of a second booking.
+  const [booked, setBooked] = useState<BookedShipment | null>(null);
+  // One key per form: a double-click or retry returns the same booking, never a second one.
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
-  const origin = WAREHOUSES.find((w) => w.code === warehouse)!.pincode;
+  const origin = warehouses.find((w) => w.code === warehouse)!.pincode;
   const box = { l: Number(dims.l), b: Number(dims.b), h: Number(dims.h) };
-  const parcelReady = isPincode(pincode) && Number(weight) > 0 && box.l > 0 && box.b > 0 && box.h > 0;
-  const codOk = payment === "PREPAID" || Number(codAmount) > 0;
+  const value = Number(orderValue);
+  const advance = payment === "COD" && advancePaid ? codAdvanceFor(value) : 0;
+  const collect = payment === "COD" ? Math.max(0, value - advance) : 0;
+  const parcelReady = isPincode(pincode) && Number(weight) > 0 && box.l > 0 && box.b > 0 && box.h > 0 && value > 0;
 
   const problems = {
     orderNumber: orderNumber.trim() ? null : "Enter the order ID",
@@ -133,13 +164,13 @@ function SingleOrder() {
     pincode: isPincode(pincode) ? null : "6-digit pin code",
     weight: Number(weight) > 0 ? null : "Weight above 0",
     box: box.l > 0 && box.b > 0 && box.h > 0 ? null : "Length, breadth and height",
-    cod: codOk ? null : "Amount to collect",
+    value: value > 0 ? null : "Order value above 0",
   };
   const show = (k: keyof typeof problems) => (touched[k] ? problems[k] : null);
   const touch = (k: string) => setTouched((t) => ({ ...t, [k]: true }));
 
   useEffect(() => {
-    if (!parcelReady || !codOk) return;
+    if (!parcelReady) return;
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       setLoading(true);
@@ -150,11 +181,11 @@ function SingleOrder() {
             originPincode: origin,
             destinationPincode: pincode,
             weightGrams: Math.round(Number(weight) * 1000),
-            lengthCm: box.l,
-            breadthCm: box.b,
-            heightCm: box.h,
+            lengthCm: Number(dims.l),
+            breadthCm: Number(dims.b),
+            heightCm: Number(dims.h),
             paymentMode: payment,
-            codAmount: payment === "COD" ? Number(codAmount) : 0,
+            codAmount: collect,
           },
           ctrl.signal,
         );
@@ -170,9 +201,7 @@ function SingleOrder() {
       clearTimeout(t);
       ctrl.abort();
     };
-    // box values are derived from dims, which is a dependency
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin, pincode, weight, dims, payment, codAmount, parcelReady, codOk]);
+  }, [origin, pincode, weight, dims, payment, collect, parcelReady]);
 
   const serviceable = quotes?.filter((q) => q.serviceable) ?? [];
   const fastest = serviceable.length ? Math.min(...serviceable.map((q) => q.etaDays)) : null;
@@ -191,19 +220,29 @@ function SingleOrder() {
     setBooking(true);
     setBookError(null);
     try {
-      const result = await bookShipment(chosenQuote.courierCode, {
-        originPincode: origin,
-        destinationPincode: pincode,
+      const result = await bookOrder({
+        orderNumber: orderNumber.trim(),
+        productBrand,
+        productName: productName.trim() || undefined,
+        customerName: customer.trim(),
+        customerPhone: mobile,
+        addressLine: address.trim(),
+        city: city.trim() || undefined,
+        pincode,
+        warehouseCode: warehouse,
+        paymentMode: payment,
+        orderValue: value,
+        codAdvance: advance,
         weightGrams: Math.round(Number(weight) * 1000),
         lengthCm: box.l,
         breadthCm: box.b,
         heightCm: box.h,
-        paymentMode: payment,
-        codAmount: payment === "COD" ? Number(codAmount) : 0,
-        orderNumber: orderNumber.trim(),
+        courierCode: chosenQuote.courierCode,
+        slot: { day: chosenSlot.day, startHour: chosenSlot.start },
         idempotencyKey,
       });
       setBooked(result);
+      announceShipmentsChanged();
     } catch (e) {
       setBookError((e as Error).message);
     } finally {
@@ -214,13 +253,15 @@ function SingleOrder() {
   function bookAnother() {
     setBooked(null);
     setOrderNumber("");
+    setProductName("");
     setCustomer("");
     setMobile("");
     setAddress("");
+    setCity("");
     setPincode("");
     setWeight("");
     setDims({ l: "", b: "", h: "" });
-    setCodAmount("");
+    setOrderValue("");
     setQuotes(null);
     setChosen(null);
     setTouched({});
@@ -240,13 +281,16 @@ function SingleOrder() {
         </motion.span>
         <h3 className="mt-4 font-display text-2xl font-bold text-navy">Booked with {booked.courierName}</h3>
         <p className="mt-1 text-sm text-muted">
-          Order #{orderNumber} for {customer} · pickup {chosenSlot.day.toLowerCase()}, {chosenSlot.label}
+          Order #{booked.orderNumber} for {customer} · pickup {chosenSlot.dayLabel.toLowerCase()}, {booked.pickupSlot?.label ?? chosenSlot.label}
         </p>
         <dl className="mt-6 grid w-full max-w-sm grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line text-left">
           {[
             ["AWB", booked.awb],
             ["Charged", formatINR(booked.chargedAmount)],
-            ["Expected delivery", new Date(booked.expectedDelivery).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })],
+            [
+              "Expected delivery",
+              new Date(booked.expectedDelivery).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short" }),
+            ],
             ["Weight charged", `${booked.chargedWeightGrams / 1000} kg`],
           ].map(([k, v]) => (
             <div key={k} className="bg-white px-4 py-3">
@@ -255,13 +299,19 @@ function SingleOrder() {
             </div>
           ))}
         </dl>
+        <div className="mt-6 flex gap-2">
+          <a href={booked.labelUrl} target="_blank" rel="noreferrer">
+            <Button>
+              <FileText size={16} /> Download label
+            </Button>
+          </a>
+          <Button variant="secondary" onClick={bookAnother}>
+            Book another order
+          </Button>
+        </div>
         <p className="mt-4 max-w-sm text-xs text-muted">
-          Demo courier: the AWB is real-format but nothing is sent to {booked.courierName}. Saving bookings, labels and the
-          customer&apos;s tracking message come in the next build steps.
+          Saved and on the Shipments board. {booked.mode === "DEMO" ? `Demo courier: nothing is sent to ${booked.courierName} yet.` : ""}
         </p>
-        <Button className="mt-6" onClick={bookAnother}>
-          Book another order
-        </Button>
       </div>
     );
   }
@@ -269,7 +319,7 @@ function SingleOrder() {
   return (
     <>
       <div className="flex-1 overflow-y-auto">
-        <Step n={1} title="Order" hint={<span className="text-xs text-muted">Or import from OMS Guru</span>}>
+        <Step n={1} title="Order">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Order ID" error={show("orderNumber")}>
               <input
@@ -280,9 +330,21 @@ function SingleOrder() {
                 className={inputClass}
               />
             </Field>
+            <Field label="Brand">
+              <select value={productBrand} onChange={(e) => setProductBrand(e.target.value)} className={inputClass}>
+                {OUR_BRANDS.map((b) => (
+                  <option key={b.slug} value={b.name}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Product">
+              <input value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="e.g. Kada bangle set" className={inputClass} />
+            </Field>
             <Field label="Ship from">
               <select value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className={inputClass}>
-                {WAREHOUSES.map((w) => (
+                {warehouses.map((w) => (
                   <option key={w.code} value={w.code}>
                     {w.name}
                   </option>
@@ -315,11 +377,14 @@ function SingleOrder() {
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   onBlur={() => touch("address")}
-                  placeholder="House, street, area, city"
+                  placeholder="House, street, area"
                   className={inputClass}
                 />
               </Field>
             </div>
+            <Field label="City">
+              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. New Delhi" className={inputClass} />
+            </Field>
             <Field label="Pin code" error={show("pincode")}>
               <input
                 value={pincode}
@@ -336,6 +401,16 @@ function SingleOrder() {
                 onChange={(e) => setWeight(e.target.value.replace(/[^\d.]/g, ""))}
                 onBlur={() => touch("weight")}
                 placeholder="e.g. 0.9"
+                inputMode="decimal"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Order value (₹)" error={show("value")}>
+              <input
+                value={orderValue}
+                onChange={(e) => setOrderValue(e.target.value.replace(/[^\d.]/g, ""))}
+                onBlur={() => touch("value")}
+                placeholder="e.g. 1499"
                 inputMode="decimal"
                 className={inputClass}
               />
@@ -358,48 +433,47 @@ function SingleOrder() {
                 </div>
               </Field>
             </div>
-            <div className="sm:col-span-2">
-              <div className="flex flex-wrap items-center gap-2">
-                {(["COD", "PREPAID"] as const).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setPayment(p)}
-                    className={clsx(
-                      "h-9 rounded-full border px-4 text-[13px] font-medium transition-colors",
-                      payment === p
-                        ? "border-brand-orange bg-brand-orange-soft text-brand-orange-dark"
-                        : "border-line text-ink-2 hover:bg-page",
-                    )}
-                  >
-                    {p === "COD" ? "Cash on delivery" : "Prepaid"}
-                  </button>
-                ))}
-                {payment === "COD" ? (
-                  <label className="ml-auto flex items-center gap-2 whitespace-nowrap text-[13px] text-muted">
-                    COD amount
-                    <span className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">₹</span>
-                      <input
-                        value={codAmount}
-                        onChange={(e) => setCodAmount(e.target.value.replace(/[^\d.]/g, ""))}
-                        onBlur={() => touch("cod")}
-                        inputMode="decimal"
-                        aria-label="COD amount"
-                        placeholder="0"
-                        className={clsx(inputClass, "h-9 w-28 pl-7", show("cod") && "border-flag-red")}
-                      />
-                    </span>
-                  </label>
-                ) : null}
-              </div>
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+              {(["COD", "PREPAID"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPayment(p)}
+                  className={clsx(
+                    "h-9 rounded-full border px-4 text-[13px] font-medium transition-colors",
+                    payment === p ? "border-brand-orange bg-brand-orange-soft text-brand-orange-dark" : "border-line text-ink-2 hover:bg-page",
+                  )}
+                >
+                  {p === "COD" ? "Cash on delivery" : "Prepaid"}
+                </button>
+              ))}
+              <span className="ml-auto text-[13px] text-muted">
+                {payment === "COD" ? (value > 0 ? `Courier collects ${formatINR(collect)}` : "Courier collects the balance") : "Nothing to collect"}
+              </span>
             </div>
+            {payment === "COD" ? (
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-brand-amber/30 bg-brand-amber-soft/60 px-4 py-3 sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={advancePaid}
+                  onChange={(e) => setAdvancePaid(e.target.checked)}
+                  className="mt-0.5 size-4 accent-brand-orange"
+                />
+                <span className="text-[13px] leading-snug text-ink-2">
+                  <span className="font-semibold text-ink">Advance paid online</span>
+                  {value > 0 && advance > 0 ? ` · ${formatINR(advance)} paid at checkout, courier collects ${formatINR(collect)}` : " · ₹49 below ₹1,000, ₹99 from ₹1,000"}
+                  <span className="mt-0.5 block text-xs text-muted">
+                    Same rule as D2C Mall. Kept if the customer refuses at the door; it covers two-way shipping.
+                  </span>
+                </span>
+              </label>
+            ) : null}
           </div>
         </Step>
 
         <Step n={2} title="Courier" hint={<DemoBadge />}>
-          {!parcelReady || !codOk ? (
-            <p className="text-sm text-muted">Add the pin code, weight, box size{payment === "COD" ? " and COD amount" : ""} to compare all 8 couriers.</p>
+          {!parcelReady ? (
+            <p className="text-sm text-muted">Add the pin code, weight, box size and order value to compare all 8 couriers.</p>
           ) : error ? (
             <p className="flex items-center gap-2 text-sm text-flag-red">
               <XCircle size={16} /> {error}
@@ -454,11 +528,7 @@ function SingleOrder() {
                   </li>
                 ))}
               </ul>
-              <button
-                type="button"
-                onClick={() => setShowAll((v) => !v)}
-                className="mt-3 text-[13px] font-medium text-brand-blue hover:underline"
-              >
+              <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-3 text-[13px] font-medium text-brand-blue hover:underline">
                 {showAll ? "Show top 3" : `Compare all ${quotes.length} couriers`}
               </button>
             </>
@@ -477,12 +547,12 @@ function SingleOrder() {
                   slot === s.key ? "border-brand-blue bg-brand-blue-soft text-brand-blue" : "border-line text-ink-2 hover:border-faint",
                 )}
               >
-                <span className="block text-[11px] font-normal text-muted">{s.day}</span>
+                <span className="block text-[11px] font-normal text-muted">{s.dayLabel}</span>
                 {s.label}
               </button>
             ))}
           </div>
-          {slots[0].day === "Tomorrow" ? (
+          {slots[0].day === "tomorrow" ? (
             <p className="mt-2 text-xs text-muted">Today&apos;s slots are too close for the courier to confirm, so these are tomorrow.</p>
           ) : null}
         </Step>
@@ -497,7 +567,7 @@ function SingleOrder() {
         <div className="flex items-center gap-4">
           <div className="min-w-0 flex-1">
             <div className="truncate text-xs text-muted">
-              {chosenQuote ? `${chosenQuote.courierName} · ${chosenSlot.day}, ${chosenSlot.label}` : "Fill the order to see the price"}
+              {chosenQuote ? `${chosenQuote.courierName} · ${chosenSlot.dayLabel}, ${chosenSlot.label}` : "Fill the order to see the price"}
             </div>
             <div className="font-display text-2xl font-bold text-navy">{chosenQuote ? formatINR(chosenQuote.total) : "—"}</div>
           </div>
@@ -511,10 +581,14 @@ function SingleOrder() {
   );
 }
 
-function BulkUpload() {
+function BulkUpload({ warehouses }: { warehouses: Warehouse[] }) {
   const [rows, setRows] = useState<BulkRow[] | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
-  const codes = WAREHOUSES.map((w) => w.code);
+  const [booking, setBooking] = useState(false);
+  const [result, setResult] = useState<BulkResult | null>(null);
+  const [bookError, setBookError] = useState<string | null>(null);
+  const [batchKey, setBatchKey] = useState(() => crypto.randomUUID());
+  const codes = warehouses.map((w) => w.code);
 
   const summary = useMemo(() => {
     if (!rows) return null;
@@ -526,6 +600,9 @@ function BulkUpload() {
     try {
       setRows(parseBulkCsv(text, codes));
       setFileError(null);
+      setResult(null);
+      setBookError(null);
+      setBatchKey(crypto.randomUUID());
     } catch (e) {
       setRows(null);
       setFileError((e as Error).message);
@@ -533,12 +610,51 @@ function BulkUpload() {
   }
 
   function downloadTemplate() {
-    const blob = new Blob([BULK_COLUMNS.join(",") + "\n"], { type: "text/csv" });
+    const blob = new Blob([[...BULK_COLUMNS, "advance_paid"].join(",") + "\n"], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "d2c-bulk-orders-template.csv";
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  async function bookAll() {
+    if (!rows || !summary || summary.bad > 0) return;
+    setBooking(true);
+    setBookError(null);
+    try {
+      const res = await bulkBook(
+        batchKey,
+        rows.map((r) => {
+          const cod = r.payment_method.toLowerCase() === "cod";
+          const value = Number(r.order_value);
+          return {
+            orderNumber: r.order_id,
+            customerName: r.customer_name,
+            customerPhone: r.customer_phone,
+            addressLine: r.address,
+            city: r.city,
+            state: r.state,
+            pincode: r.pincode,
+            warehouseCode: r.pickup_warehouse_id,
+            rtoWarehouseCode: r.rto_warehouse_id || undefined,
+            paymentMode: cod ? "COD" : "PREPAID",
+            orderValue: value,
+            codAdvance: cod && r.advance_paid ? Number(r.advance_paid) : 0,
+            weightGrams: Math.round(Number(r.weight_kg) * 1000),
+            lengthCm: Math.round(Number(r.length_cm)),
+            breadthCm: Math.round(Number(r.breadth_cm)),
+            heightCm: Math.round(Number(r.height_cm)),
+          };
+        }),
+      );
+      setResult(res);
+      announceShipmentsChanged();
+    } catch (e) {
+      setBookError((e as Error).message);
+    } finally {
+      setBooking(false);
+    }
   }
 
   return (
@@ -557,9 +673,7 @@ function BulkUpload() {
             <UploadCloud size={21} />
           </span>
           <span className="text-[15px] font-semibold text-ink">Drop a CSV or tap to choose</span>
-          <span className="max-w-sm text-[13px] text-muted">
-            Same columns as our Velocity sheet. Every row is checked before anything books.
-          </span>
+          <span className="max-w-sm text-[13px] text-muted">Same columns as our Velocity sheet. Every row is checked before anything books.</span>
           <input
             type="file"
             accept=".csv,text/csv"
@@ -575,7 +689,10 @@ function BulkUpload() {
             <FileSpreadsheet size={14} /> Template
           </Button>
           <Button variant="ghost" size="sm" onClick={() => load(SAMPLE_BULK_CSV)}>
-            Try a sample file
+            Sample with mistakes
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => load(SAMPLE_BULK_CSV_CLEAN)}>
+            Clean sample
           </Button>
         </div>
 
@@ -588,55 +705,90 @@ function BulkUpload() {
         {rows && summary ? (
           <div className="mt-5">
             <div className="mb-3 flex items-center gap-2">
-              <span className="flex-1 text-sm font-semibold text-ink">{summary.total} orders checked</span>
-              <Badge tone="green" dot>
-                {summary.good} ready
-              </Badge>
-              {summary.bad ? (
-                <Badge tone="red" dot>
-                  {summary.bad} to fix
-                </Badge>
-              ) : null}
+              <span className="flex-1 text-sm font-semibold text-ink">{result ? "Booking result" : `${summary.total} orders checked`}</span>
+              {result ? (
+                <>
+                  <Badge tone="green" dot>
+                    {result.booked} booked
+                  </Badge>
+                  {result.failed ? (
+                    <Badge tone="red" dot>
+                      {result.failed} not booked
+                    </Badge>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Badge tone="green" dot>
+                    {summary.good} ready
+                  </Badge>
+                  {summary.bad ? (
+                    <Badge tone="red" dot>
+                      {summary.bad} to fix
+                    </Badge>
+                  ) : null}
+                </>
+              )}
             </div>
             <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
-              {rows.map((r) => (
-                <li key={r.line} className={clsx("flex items-start gap-3 px-4 py-3", r.errors.length && "bg-flag-red-soft/60")}>
-                  {r.errors.length ? (
-                    <XCircle size={17} className="mt-0.5 shrink-0 text-flag-red" />
-                  ) : (
-                    <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-brand-green" />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium text-ink">
-                      #{r.order_id} · {r.customer_name}
-                      <span className="font-normal text-muted">
-                        {" "}
-                        · {r.pincode} · {r.payment_method} · {r.weight_kg} kg
-                      </span>
-                    </span>
-                    {r.errors.length ? (
-                      <span className="mt-0.5 block text-xs font-medium text-flag-red">
-                        Row {r.line}: {r.errors.join(" · ")}
-                      </span>
+              {rows.map((r) => {
+                const outcome = result?.results.find((x) => x.orderNumber === r.order_id);
+                const bad = r.errors.length > 0 || (outcome && !outcome.ok);
+                return (
+                  <li key={r.line} className={clsx("flex items-start gap-3 px-4 py-3", bad && "bg-flag-red-soft/60")}>
+                    {bad ? (
+                      <XCircle size={17} className="mt-0.5 shrink-0 text-flag-red" />
                     ) : (
-                      <span className="mt-0.5 block text-xs text-muted">Ships from {r.pickup_warehouse_id}</span>
+                      <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-brand-green" />
                     )}
-                  </span>
-                </li>
-              ))}
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-ink">
+                        #{r.order_id} · {r.customer_name}
+                        <span className="font-normal text-muted">
+                          {" "}
+                          · {r.pincode} · {r.payment_method} · {r.weight_kg} kg
+                        </span>
+                      </span>
+                      {r.errors.length ? (
+                        <span className="mt-0.5 block text-xs font-medium text-flag-red">
+                          Row {r.line}: {r.errors.join(" · ")}
+                        </span>
+                      ) : outcome ? (
+                        <span className={clsx("mt-0.5 block text-xs", outcome.ok ? "text-[#0e6e05]" : "font-medium text-flag-red")}>
+                          {outcome.ok ? `Booked with ${outcome.courier} · AWB ${outcome.awb}` : outcome.error}
+                        </span>
+                      ) : (
+                        <span className="mt-0.5 block text-xs text-muted">Ships from {r.pickup_warehouse_id}</span>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ) : null}
       </div>
-      <div className="flex items-center gap-4 border-t border-line px-6 py-4">
-        <p className="flex-1 text-xs text-muted">Couriers are picked by rules: pin code, weight, COD and courier performance.</p>
-        <Button size="lg" disabled title="Bulk booking switches on with the next build step">
-          {!summary
-            ? "Book shipments"
-            : summary.bad > 0
-              ? `Fix ${summary.bad} row${summary.bad > 1 ? "s" : ""} first`
-              : `${summary.good} ready · booking opens next step`}
-        </Button>
+      <div className="border-t border-line px-6 py-4">
+        {bookError ? (
+          <p className="mb-3 flex items-center gap-2 text-[13px] text-flag-red">
+            <XCircle size={15} /> {bookError}
+          </p>
+        ) : null}
+        <div className="flex items-center gap-4">
+          <p className="flex-1 text-xs text-muted">Each order gets the cheapest courier with reliable pickups and the earliest slot it can confirm.</p>
+          <Button size="lg" disabled={!summary || summary.bad > 0 || booking || !!result} onClick={bookAll}>
+            {booking ? <Loader2 size={17} className="animate-spin" /> : null}
+            {!summary
+              ? "Book shipments"
+              : result
+                ? "Done"
+                : summary.bad > 0
+                  ? `Fix ${summary.bad} row${summary.bad > 1 ? "s" : ""} first`
+                  : booking
+                    ? "Booking…"
+                    : `Book ${summary.good} shipments`}
+          </Button>
+        </div>
       </div>
     </>
   );

@@ -1,13 +1,24 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, CalendarClock, Columns3, Printer, Rows3, Truck, X } from "lucide-react";
+import { AlertTriangle, Columns3, FileText, Loader2, Rows3, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
-import { Badge, Button, Card, type Tone } from "@/components/ui/primitives";
-import { formatINR, type Lane, LANE_TOTALS, LANES, type Shipment, SHIPMENTS } from "@/lib/sample-data";
+import { Badge, Button, Card, DemoBadge } from "@/components/ui/primitives";
+import { type BoardCard, getBoard, type Lane, type Tone } from "@/lib/api";
+import { formatINR } from "@/lib/format";
+import { useLive } from "@/lib/use-live";
 
-const laneHeader: Record<Tone, string> = {
+const LANES: { key: Lane; label: string; hint: string; tone: Tone }[] = [
+  { key: "PROBLEM", label: "Needs a fix", hint: "Stuck, failed or late", tone: "red" },
+  { key: "TO_PACK", label: "To pack", hint: "Booked or waiting to book", tone: "orange" },
+  { key: "READY", label: "Ready for pickup", hint: "Courier confirmed", tone: "amber" },
+  { key: "MOVING", label: "On the way", hint: "Picked up, between hubs", tone: "blue" },
+  { key: "OUT_TODAY", label: "Out today", hint: "Arriving today", tone: "green" },
+  { key: "DELIVERED", label: "Done", hint: "Delivered or returned", tone: "green" },
+];
+
+const laneDot: Record<Tone, string> = {
   red: "bg-flag-red",
   orange: "bg-brand-orange",
   amber: "bg-brand-amber",
@@ -25,22 +36,45 @@ const noteClass: Record<Tone, string> = {
   grey: "bg-page text-ink-2",
 };
 
-const BRAND_FILTERS = ["All brands", ...Array.from(new Set(SHIPMENTS.map((s) => s.brand)))];
+/** Returned parcels share the last column with delivered ones. */
+const columnOf = (c: BoardCard): Lane => (c.lane === "RETURNED" ? "DELIVERED" : c.lane);
+const CARDS_PER_LANE = 6;
 
 export function JourneyBoard() {
+  const { data, error } = useLive(getBoard);
   const [view, setView] = useState<"board" | "table">("board");
   const [brand, setBrand] = useState("All brands");
 
-  const shipments = useMemo(
-    () => (brand === "All brands" ? SHIPMENTS : SHIPMENTS.filter((s) => s.brand === brand)),
-    [brand],
+  const brands = useMemo(
+    () => ["All brands", ...Array.from(new Set((data ?? []).map((c) => c.brand))).sort()],
+    [data],
   );
+  const cards = useMemo(
+    () => (brand === "All brands" ? data ?? [] : (data ?? []).filter((c) => c.brand === brand)),
+    [data, brand],
+  );
+
+  if (error && !data) {
+    return (
+      <Card className="p-10 text-center">
+        <p className="text-sm font-medium text-flag-red">Couldn&apos;t load shipments: {error}</p>
+        <p className="mt-1 text-xs text-muted">It retries every 30 seconds.</p>
+      </Card>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-24 text-sm text-muted">
+        <Loader2 size={18} className="animate-spin" /> Loading shipments…
+      </div>
+    );
+  }
 
   return (
     <>
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <div className="flex flex-1 gap-2 overflow-x-auto pb-1">
-          {BRAND_FILTERS.map((b) => (
+        <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
+          {brands.map((b) => (
             <button
               key={b}
               onClick={() => setBrand(b)}
@@ -76,31 +110,27 @@ export function JourneyBoard() {
         </div>
       </div>
 
-      {view === "board" ? (
-        <Board shipments={shipments} filtered={brand !== "All brands"} onSeeAll={() => setView("table")} />
+      {data.length === 0 ? (
+        <Card className="p-12 text-center">
+          <p className="text-[15px] font-semibold text-ink">No shipments yet</p>
+          <p className="mt-1 text-sm text-muted">Book your first order with “New shipment”. It appears here at once.</p>
+        </Card>
+      ) : view === "board" ? (
+        <Board cards={cards} onSeeAll={() => setView("table")} />
       ) : (
-        <Table shipments={shipments} />
+        <Table cards={cards} />
       )}
     </>
   );
 }
 
-function Board({
-  shipments,
-  filtered,
-  onSeeAll,
-}: {
-  shipments: Shipment[];
-  filtered: boolean;
-  onSeeAll: () => void;
-}) {
+function Board({ cards, onSeeAll }: { cards: BoardCard[]; onSeeAll: () => void }) {
   return (
     <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
       <div className="grid grid-cols-[repeat(6,minmax(216px,1fr))] gap-3">
         {LANES.map((lane) => {
-          const cards = shipments.filter((s) => s.lane === lane.key);
-          // All brands: the lane's full count. Filtered: only that brand's cards.
-          const total = filtered ? cards.length : LANE_TOTALS[lane.key as Lane];
+          const inLane = cards.filter((c) => columnOf(c) === lane.key);
+          const shown = inLane.slice(0, CARDS_PER_LANE);
           const problem = lane.key === "PROBLEM";
           return (
             <section
@@ -112,35 +142,35 @@ function Board({
               )}
             >
               <header className="flex items-center gap-2 px-2 pb-2 pt-1.5">
-                <span className={clsx("size-2 rounded-full", laneHeader[lane.tone])} />
+                <span className={clsx("size-2 rounded-full", laneDot[lane.tone])} />
                 <h2 className={clsx("text-[13.5px] font-semibold", problem ? "text-flag-red" : "text-ink")}>{lane.label}</h2>
                 <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold tabular-nums text-ink-2">
-                  {total}
+                  {inLane.length}
                 </span>
               </header>
               <p className="px-2 pb-2 text-[11.5px] text-muted">{lane.hint}</p>
               <div className="flex flex-col gap-2">
-                {cards.map((s, i) => (
+                {shown.map((c, i) => (
                   <motion.div
-                    key={s.id}
+                    key={c.id}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: i * 0.03 }}
+                    transition={{ duration: 0.18, delay: Math.min(i, 6) * 0.03 }}
                   >
-                    <ShipmentCard s={s} />
+                    <ShipmentCard c={c} />
                   </motion.div>
                 ))}
-                {cards.length === 0 ? (
+                {inLane.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-muted">
-                    Nothing here
+                    {problem ? "Nothing needs a fix" : "Nothing here"}
                   </p>
                 ) : null}
-                {total > cards.length ? (
+                {inLane.length > shown.length ? (
                   <button
                     onClick={onSeeAll}
                     className="rounded-xl py-2 text-[12.5px] font-medium text-muted hover:bg-white/70 hover:text-ink"
                   >
-                    + {total - cards.length} more · see all in table
+                    + {inLane.length - shown.length} more · see all in table
                   </button>
                 ) : null}
               </div>
@@ -152,42 +182,52 @@ function Board({
   );
 }
 
-function ShipmentCard({ s }: { s: Shipment }) {
+function ShipmentCard({ c }: { c: BoardCard }) {
   return (
     <article className="rounded-xl border border-line bg-white p-3 shadow-[var(--shadow-card)]">
       <div className="flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-orange-dark">{s.brand}</span>
-        <span className="ml-auto text-[11.5px] tabular-nums text-faint">#{s.id}</span>
+        <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-brand-orange-dark">{c.brand}</span>
+        <span className="ml-auto shrink-0 text-[11.5px] tabular-nums text-faint">#{c.orderNumber}</span>
       </div>
-      <div className="mt-1 truncate text-sm font-medium text-ink">{s.product}</div>
+      <div className="mt-1 truncate text-sm font-medium text-ink">{c.product}</div>
       <div className="mt-0.5 truncate text-xs text-muted">
-        {s.customer} · {s.city}
-        {s.courier ? ` · ${s.courier}` : ""}
+        {c.customer} · {c.city || c.pincode}
+        {c.courier ? ` · ${c.courier}` : ""}
       </div>
-      <p className={clsx("mt-2.5 rounded-lg px-2 py-1.5 text-[11.5px] font-medium leading-snug", noteClass[s.noteTone])}>
-        {s.note}
-      </p>
+      <p className={clsx("mt-2.5 rounded-lg px-2 py-1.5 text-[11.5px] font-medium leading-snug", noteClass[c.tone])}>{c.note}</p>
       <div className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5">
-        <Badge tone={s.payment === "COD" ? "amber" : "green"}>{s.payment}</Badge>
-        {s.rtoRisk ? (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-flag-red">
-            <AlertTriangle size={11} /> {s.rtoRisk} RTO risk
+        <Badge tone={c.payment === "COD" ? "amber" : "green"}>{c.payment}</Badge>
+        {c.advance > 0 ? (
+          <span className="text-[11px] font-medium text-[#b54708]" title={`${formatINR(c.advance)} advance paid online · collect ${formatINR(c.collect)}`}>
+            +{formatINR(c.advance)} adv.
           </span>
+        ) : null}
+        {c.labelUrl ? (
+          <a
+            href={c.labelUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-[11.5px] font-medium text-brand-blue hover:underline"
+            title="Shipping label (PDF)"
+          >
+            <FileText size={12} /> Label
+          </a>
         ) : null}
         <span
           className="ml-auto grid size-6 place-items-center rounded-full bg-brand-blue-soft text-[10px] font-semibold text-brand-blue"
-          title={`Owner: ${s.ownerName}`}
+          title={`Owner: ${c.ownerName}`}
         >
-          {s.owner}
+          {c.owner}
         </span>
       </div>
     </article>
   );
 }
 
-function Table({ shipments }: { shipments: Shipment[] }) {
+function Table({ cards }: { cards: BoardCard[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const allChecked = shipments.length > 0 && shipments.every((s) => selected.has(s.id));
+  const booked = cards.filter((c) => c.labelUrl);
+  const allChecked = booked.length > 0 && booked.every((c) => selected.has(c.id));
   const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -195,6 +235,9 @@ function Table({ shipments }: { shipments: Shipment[] }) {
       else next.add(id);
       return next;
     });
+  const openLabels = () => {
+    for (const c of cards) if (selected.has(c.id) && c.labelUrl) window.open(c.labelUrl, "_blank");
+  };
 
   return (
     <Card>
@@ -209,14 +252,8 @@ function Table({ shipments }: { shipments: Shipment[] }) {
           >
             <div className="m-3 flex flex-wrap items-center gap-2 rounded-xl bg-navy px-4 py-2.5 text-white">
               <span className="mr-2 text-[13px] font-medium">{selected.size} selected</span>
-              <Button size="sm">
-                <Truck size={14} /> Book
-              </Button>
-              <Button size="sm" variant="ghost" className="text-white hover:bg-white/10">
-                <CalendarClock size={14} /> Pickup slot
-              </Button>
-              <Button size="sm" variant="ghost" className="text-white hover:bg-white/10">
-                <Printer size={14} /> Labels
+              <Button size="sm" onClick={openLabels}>
+                <FileText size={14} /> Open labels
               </Button>
               <button
                 onClick={() => setSelected(new Set())}
@@ -230,15 +267,15 @@ function Table({ shipments }: { shipments: Shipment[] }) {
         ) : null}
       </AnimatePresence>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] text-sm">
+        <table className="w-full min-w-[960px] text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs font-medium uppercase tracking-wide text-muted">
               <th className="w-10 px-4 py-3">
                 <input
                   type="checkbox"
-                  aria-label="Select all"
+                  aria-label="Select all booked"
                   checked={allChecked}
-                  onChange={() => setSelected(allChecked ? new Set() : new Set(shipments.map((s) => s.id)))}
+                  onChange={() => setSelected(allChecked ? new Set() : new Set(booked.map((c) => c.id)))}
                   className="size-4 accent-brand-orange"
                 />
               </th>
@@ -248,53 +285,75 @@ function Table({ shipments }: { shipments: Shipment[] }) {
               <th className="px-3 py-3">Latest</th>
               <th className="px-3 py-3">Courier</th>
               <th className="px-3 py-3 text-right">Value</th>
+              <th className="px-3 py-3">Label</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {shipments.map((s) => {
-              const lane = LANES.find((l) => l.key === s.lane)!;
+            {cards.map((c) => {
+              const lane = LANES.find((l) => l.key === columnOf(c))!;
               return (
-                <tr key={s.id} className={clsx("hover:bg-page/70", selected.has(s.id) && "bg-brand-orange-soft/40")}>
+                <tr key={c.id} className={clsx("hover:bg-page/70", selected.has(c.id) && "bg-brand-orange-soft/40")}>
                   <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select order ${s.id}`}
-                      checked={selected.has(s.id)}
-                      onChange={() => toggle(s.id)}
-                      className="size-4 accent-brand-orange"
-                    />
+                    {c.labelUrl ? (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select order ${c.orderNumber}`}
+                        checked={selected.has(c.id)}
+                        onChange={() => toggle(c.id)}
+                        className="size-4 accent-brand-orange"
+                      />
+                    ) : null}
                   </td>
                   <td className="px-3 py-3">
-                    <span className="font-semibold text-brand-blue">#{s.id}</span>
+                    <span className="font-semibold text-brand-blue">#{c.orderNumber}</span>
                     <div className="text-xs text-muted">
-                      {s.brand} · {s.product}
+                      {c.brand} · {c.product}
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="text-ink">{s.customer}</div>
+                    <div className="text-ink">{c.customer}</div>
                     <div className="text-xs text-muted">
-                      {s.city} · {s.pincode}
+                      {c.city} · {c.pincode}
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <Badge tone={lane.tone} dot>
-                      {lane.label}
+                    <Badge tone={c.lane === "RETURNED" ? "grey" : lane.tone} dot>
+                      {c.lane === "RETURNED" ? "Returned" : lane.label}
                     </Badge>
                   </td>
-                  <td className="max-w-[260px] truncate px-3 py-3 text-ink-2">{s.note}</td>
+                  <td className="max-w-[260px] truncate px-3 py-3 text-ink-2" title={c.note}>
+                    {c.note}
+                  </td>
                   <td className="px-3 py-3">
-                    {s.courier ? (
+                    {c.courier ? (
                       <>
-                        <div className="text-ink">{s.courier}</div>
-                        <div className="font-mono text-[11px] text-muted">{s.awb}</div>
+                        <div className="flex items-center gap-1.5 text-ink">
+                          {c.courier} {c.isDemo ? <DemoBadge /> : null}
+                        </div>
+                        <div className="font-mono text-[11px] text-muted">{c.awb}</div>
                       </>
                     ) : (
-                      <span className="text-xs text-faint">Not booked</span>
+                      <span className="inline-flex items-center gap-1 text-xs text-faint">
+                        <AlertTriangle size={12} /> Not booked
+                      </span>
                     )}
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums text-ink-2">
-                    {formatINR(s.amount)}
-                    <div className="text-xs text-muted">{s.payment}</div>
+                    {formatINR(c.amount)}
+                    <div className="text-xs text-muted">
+                      {c.payment === "COD" && c.advance > 0
+                        ? `${formatINR(c.advance)} advance · collect ${formatINR(c.collect)}`
+                        : c.payment}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3">
+                    {c.labelUrl ? (
+                      <a href={c.labelUrl} target="_blank" rel="noreferrer" className="text-[13px] font-medium text-brand-blue hover:underline">
+                        PDF
+                      </a>
+                    ) : (
+                      <span className="text-xs text-faint">—</span>
+                    )}
                   </td>
                 </tr>
               );

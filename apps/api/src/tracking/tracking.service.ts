@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { BrandService } from '../common/brand.service.js';
+import { settleAdvance } from '../common/cod-advance.js';
 import { CouriersService } from '../couriers/couriers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -69,9 +70,11 @@ export class TrackingService {
         lastScanAt = fresh.at(-1)!.occurredAt;
         scans += fresh.length;
         await this.prisma.shipment.update({ where: { id: s.id }, data: { status, lastScanAt } });
+        const advanceStatus = Number(s.order.codAdvance) > 0 ? settleAdvance(status) : null;
         await this.prisma.order.update({
           where: { id: s.orderId },
           data: {
+            ...(advanceStatus ? { advanceStatus } : {}),
             status:
               status === 'DELIVERED'
                 ? 'DELIVERED'
