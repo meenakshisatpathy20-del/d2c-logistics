@@ -85,4 +85,6 @@ export interface CourierAdapter {
   book(req: BookingRequest, now?: Date): Promise<BookingResult>;
   /** etaDays should be the quote's etaDays, so tracking matches the expected delivery date. */
   track(awb: string, bookedAt: Date, etaDays?: number, now?: Date): Promise<TrackingScan[]>;
+  /** Cancels a booking before pickup, so the courier never sends an executive or bills it. */
+  cancel(awb: string): Promise<{ cancelled: boolean }>;
 }

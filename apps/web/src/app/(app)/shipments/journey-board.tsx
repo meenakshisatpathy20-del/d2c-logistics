@@ -40,7 +40,8 @@ const noteClass: Record<Tone, string> = {
 const columnOf = (c: BoardCard): Lane => (c.lane === "RETURNED" ? "DELIVERED" : c.lane);
 const CARDS_PER_LANE = 6;
 
-export function JourneyBoard() {
+/** With onSeeAll set (Orders screen), the board shows alone and "see all" goes back to the table. */
+export function JourneyBoard({ onSeeAll }: { onSeeAll?: () => void } = {}) {
   const { data, error } = useLive(getBoard);
   const [view, setView] = useState<"board" | "table">("board");
   const [brand, setBrand] = useState("All brands");
@@ -87,6 +88,7 @@ export function JourneyBoard() {
             </button>
           ))}
         </div>
+        {onSeeAll ? null : (
         <div className="flex rounded-xl border border-line bg-white p-1" role="tablist" aria-label="View">
           {(
             [
@@ -108,15 +110,16 @@ export function JourneyBoard() {
             </button>
           ))}
         </div>
+        )}
       </div>
 
       {data.length === 0 ? (
         <Card className="p-12 text-center">
           <p className="text-[15px] font-semibold text-ink">No shipments yet</p>
-          <p className="mt-1 text-sm text-muted">Book your first order with “New shipment”. It appears here at once.</p>
+          <p className="mt-1 text-sm text-muted">Book your first order with “Create order”. It appears here at once.</p>
         </Card>
       ) : view === "board" ? (
-        <Board cards={cards} onSeeAll={() => setView("table")} />
+        <Board cards={cards} onSeeAll={onSeeAll ?? (() => setView("table"))} />
       ) : (
         <Table cards={cards} />
       )}

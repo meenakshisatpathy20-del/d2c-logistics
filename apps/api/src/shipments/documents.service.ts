@@ -38,16 +38,39 @@ export class DocumentsService {
 
   /** 4 x 6 inch shipping label. */
   async label(shipmentId: string): Promise<Buffer> {
+    return this.labels([shipmentId]);
+  }
+
+  /** Many 4 x 6 labels in one PDF, one per page, so a batch prints in one go. */
+  async labels(shipmentIds: string[]): Promise<Buffer> {
     const brandId = await this.brands.currentBrandId();
-    const s = await this.prisma.shipment.findFirst({
-      where: { id: shipmentId, brandId },
+    const found = await this.prisma.shipment.findMany({
+      where: { id: { in: shipmentIds }, brandId, status: { not: 'CANCELLED' } },
       include: { courier: true, pickup: true, order: { include: { pickupWarehouse: true, rtoWarehouse: true } } },
     });
-    if (!s) throw new NotFoundException('Shipment not found');
+    if (!found.length) throw new NotFoundException('Shipment not found');
+    const ordered = shipmentIds.map((id) => found.find((s) => s.id === id)).filter((s): s is (typeof found)[number] => !!s);
+    const doc = new PDFDocument({ size: [288, 432], margin: 0, autoFirstPage: false, info: { Title: ordered.length === 1 ? `Label ${ordered[0].awb}` : `${ordered.length} labels` } });
+    for (const s of ordered) {
+      doc.addPage({ size: [288, 432], margin: 0 });
+      await this.drawLabel(doc, s);
+    }
+    return toBuffer(doc);
+  }
+
+  private async drawLabel(
+    doc: PDFKit.PDFDocument,
+    s: Awaited<ReturnType<PrismaService['shipment']['findFirstOrThrow']>> & {
+      courier: { name: string };
+      pickup: { slotStart: Date } | null;
+      order: Awaited<ReturnType<PrismaService['order']['findFirstOrThrow']>> & {
+        pickupWarehouse: { name: string; city: string; pincode: string };
+        rtoWarehouse: { name: string; city: string; pincode: string } | null;
+      };
+    },
+  ) {
     const o = s.order;
     const W = 288;
-    const H = 432;
-    const doc = new PDFDocument({ size: [W, H], margin: 0, info: { Title: `Label ${s.awb}` } });
 
     wordmark(doc, 14, 14, 11);
     doc.font('Helvetica-Bold').fontSize(16).fillColor(NAVY).text(s.courier.name, 14, 34, { width: W - 28 });
@@ -99,8 +122,6 @@ export class DocumentsService {
     doc.fontSize(8).fillColor(NAVY);
     doc.text(`${from.name}\n${from.city} ${from.pincode}`, 14, 384, { width: W / 2 - 18 });
     doc.text(`${ret.name}\n${ret.city} ${ret.pincode}`, W / 2 + 4, 384, { width: W / 2 - 18 });
-
-    return toBuffer(doc);
   }
 
   /** Pickup manifest: every parcel the courier collects in one slot, with signatures. */

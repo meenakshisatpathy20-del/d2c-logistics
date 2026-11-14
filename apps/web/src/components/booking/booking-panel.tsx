@@ -22,8 +22,16 @@ import { codAdvanceFor } from "@/lib/cod-advance";
 import { formatINR } from "@/lib/format";
 import { slotOptions } from "@/lib/pickup-slots";
 
-export function BookingPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [mode, setMode] = useState<"single" | "bulk">("single");
+export function BookingPanel({
+  open,
+  onClose,
+  initialMode = "single",
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialMode?: "single" | "bulk";
+}) {
+  const [mode, setMode] = useState<"single" | "bulk">(initialMode);
   const [warehouses, setWarehouses] = useState<Warehouse[] | null>(null);
 
   useEffect(() => {
@@ -281,7 +289,7 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
         </motion.span>
         <h3 className="mt-4 font-display text-2xl font-bold text-navy">Booked with {booked.courierName}</h3>
         <p className="mt-1 text-sm text-muted">
-          Order #{booked.orderNumber} for {customer} · pickup {chosenSlot.dayLabel.toLowerCase()}, {booked.pickupSlot?.label ?? chosenSlot.label}
+          Order #{booked.orderNumber} for {customer} · pickup {chosenSlot.dayLabel === "Today" || chosenSlot.dayLabel === "Tomorrow" ? chosenSlot.dayLabel.toLowerCase() : chosenSlot.dayLabel}, {booked.pickupSlot?.label ?? chosenSlot.label}
         </p>
         <dl className="mt-6 grid w-full max-w-sm grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line text-left">
           {[
@@ -310,7 +318,7 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
           </Button>
         </div>
         <p className="mt-4 max-w-sm text-xs text-muted">
-          Saved and on the Shipments board. {booked.mode === "DEMO" ? `Demo courier: nothing is sent to ${booked.courierName} yet.` : ""}
+          Saved and in Orders. {booked.mode === "DEMO" ? `Demo courier: nothing is sent to ${booked.courierName} yet.` : ""}
         </p>
       </div>
     );
@@ -552,8 +560,12 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
               </button>
             ))}
           </div>
-          {slots[0].day === "tomorrow" ? (
-            <p className="mt-2 text-xs text-muted">Today&apos;s slots are too close for the courier to confirm, so these are tomorrow.</p>
+          {slots[0].day === "next" ? (
+            <p className="mt-2 text-xs text-muted">
+              {slots[0].dayLabel === "Tomorrow"
+                ? "Today’s slots are too close for the courier to confirm, so these are tomorrow."
+                : `No pickups on Sundays or holidays, so these are ${slots[0].dayLabel}.`}
+            </p>
           ) : null}
         </Step>
       </div>
@@ -610,7 +622,7 @@ function BulkUpload({ warehouses }: { warehouses: Warehouse[] }) {
   }
 
   function downloadTemplate() {
-    const blob = new Blob([[...BULK_COLUMNS, "advance_paid"].join(",") + "\n"], { type: "text/csv" });
+    const blob = new Blob([[...BULK_COLUMNS, "brand", "product", "advance_paid"].join(",") + "\n"], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "d2c-bulk-orders-template.csv";
@@ -630,6 +642,8 @@ function BulkUpload({ warehouses }: { warehouses: Warehouse[] }) {
           const value = Number(r.order_value);
           return {
             orderNumber: r.order_id,
+            productBrand: r.brand || undefined,
+            productName: r.product || undefined,
             customerName: r.customer_name,
             customerPhone: r.customer_phone,
             addressLine: r.address,

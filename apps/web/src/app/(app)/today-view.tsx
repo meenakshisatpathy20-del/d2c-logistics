@@ -1,9 +1,10 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowRight, Check, CircleDashed, Clock, Loader2, PartyPopper, Siren, UserRound, X } from "lucide-react";
+import { ArrowRight, Check, CircleDashed, Clock, Loader2, X } from "lucide-react";
 import Link from "next/link";
-import { PageHeader } from "@/components/shell/app-shell";
+import { AllClear, NeedsYouCard } from "@/components/home/needs-you";
+import { StepCards } from "@/components/home/step-cards";
 import { BrandLogo, OUR_BRANDS } from "@/components/ui/logo";
 import { Badge, Card, DemoBadge } from "@/components/ui/primitives";
 import { getToday, type SlotState, type TodayData } from "@/lib/api";
@@ -38,7 +39,7 @@ function greeting(hour: number) {
 const brandSlug = (name: string) => OUR_BRANDS.find((b) => b.name === name)?.slug;
 
 export function TodayView() {
-  const { data, error } = useLive(getToday, 30_000);
+  const { data, error, refresh } = useLive(getToday, 30_000);
 
   if (error && !data) {
     return (
@@ -65,24 +66,24 @@ export function TodayView() {
 
   return (
     <>
-      <PageHeader
-        title={greeting(data.nowHour)}
-        subtitle={
-          <>
-            {date} ·{" "}
-            <span className="font-medium text-ink">
-              {data.summary.pickupsDue} pickups today, {data.summary.pickupsDone} done
-            </span>{" "}
-            ·{" "}
-            <span className={clsx("font-medium", data.summary.needsYou ? "text-flag-red" : "text-[#0e6e05]")}>
-              {data.summary.needsYou ? `${data.summary.needsYou} need${data.summary.needsYou === 1 ? "s" : ""} you` : "nothing needs you"}
-            </span>
-          </>
-        }
-      />
+      <div className="mb-5">
+        <h1 className="font-display text-[26px] font-bold tracking-tight text-navy">{greeting(data.nowHour)}</h1>
+        <p className="mt-1 text-[14px] text-muted">
+          {date} ·{" "}
+          <span className="font-medium text-ink">
+            {data.summary.pickupsDue} pickups today, {data.summary.pickupsDone} done
+          </span>{" "}
+          ·{" "}
+          <span className={clsx("font-medium", data.summary.needsYou ? "text-flag-red" : "text-[#0e6e05]")}>
+            {data.summary.needsYou ? `${data.summary.needsYou} need${data.summary.needsYou === 1 ? "s" : ""} you` : "nothing needs you"}
+          </span>
+        </p>
+      </div>
+
+      <StepCards pulse={data.pulse} />
 
       <div className="grid gap-6 xl:grid-cols-[400px_1fr] [&>*]:min-w-0">
-        <NeedsYou items={data.needsYou} />
+        <NeedsYou items={data.needsYou} onChanged={refresh} />
         <Timeline data={data} />
       </div>
 
@@ -140,63 +141,29 @@ export function TodayView() {
   );
 }
 
-function NeedsYou({ items }: { items: TodayData["needsYou"] }) {
+function NeedsYou({ items, onChanged }: { items: TodayData["needsYou"]; onChanged: () => void }) {
+  const open = items.filter((n) => !n.acted).length;
   return (
     <section aria-labelledby="needs-you">
       <div className="mb-3 flex items-center justify-between">
         <h2 id="needs-you" className="text-[15px] font-semibold text-ink">
-          Needs you
+          Needs you {open ? <span className="ml-1 rounded-full bg-flag-red px-1.5 text-[11px] font-bold text-white">{open}</span> : null}
         </h2>
         <span className="text-xs text-muted">Critical first · each has one owner</span>
       </div>
       {items.length === 0 ? (
-        <Card className="flex flex-col items-center gap-2 p-8 text-center">
-          <PartyPopper size={22} className="text-brand-green" />
-          <p className="text-sm font-medium text-ink">All clear</p>
-          <p className="text-xs text-muted">New problems appear here the moment the rules spot them.</p>
-        </Card>
+        <AllClear />
       ) : (
         <ul className="space-y-3">
           {items.slice(0, 5).map((n) => (
             <li key={n.id}>
-              <Card className="p-4">
-                <div className="flex gap-3">
-                  <span
-                    className={clsx(
-                      "grid size-9 shrink-0 place-items-center rounded-xl",
-                      n.severity === "critical" ? "bg-flag-red-soft text-flag-red" : "bg-brand-amber-soft text-brand-amber",
-                    )}
-                  >
-                    <Siren size={17} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-ink">{n.title}</div>
-                    <div className="mt-0.5 text-[13px] text-muted">{n.detail}</div>
-                  </div>
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-2 pl-12">
-                  <span className="min-w-0 text-xs">
-                    <span className={clsx("font-medium", n.overdue || n.severity === "critical" ? "text-flag-red" : "text-[#b54708]")}>
-                      {n.due}
-                    </span>
-                    <span className="ml-2 inline-flex items-center gap-1 text-muted">
-                      <UserRound size={12} /> {n.owner}
-                    </span>
-                  </span>
-                  <Link
-                    href="/shipments"
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-navy px-3 py-1.5 text-[12.5px] font-medium text-white transition-colors hover:bg-navy-2"
-                  >
-                    {n.action} <ArrowRight size={13} />
-                  </Link>
-                </div>
-              </Card>
+              <NeedsYouCard item={n} onChanged={onChanged} />
             </li>
           ))}
           {items.length > 5 ? (
             <li>
-              <Link href="/shipments" className="block text-center text-[13px] font-medium text-brand-blue hover:underline">
-                + {items.length - 5} more on the Shipments board
+              <Link href="/ndr" className="flex items-center justify-center gap-1 text-[13px] font-medium text-brand-blue hover:underline">
+                See all {items.length} in NDR &amp; Returns <ArrowRight size={13} />
               </Link>
             </li>
           ) : null}
@@ -206,7 +173,7 @@ function NeedsYou({ items }: { items: TodayData["needsYou"] }) {
   );
 }
 
-function Timeline({ data }: { data: TodayData }) {
+export function Timeline({ data }: { data: TodayData }) {
   const showNow = data.nowHour >= START && data.nowHour <= END;
   const nowText = new Date(data.now).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" });
   return (
@@ -319,7 +286,7 @@ function overlapDepth(slots: Slot[]): number {
   return slots.reduce((m, _, i) => Math.max(m, laneIndex(slots, i) + 1), 0);
 }
 
-function Pulse({ dot, label, value, sub }: { dot: string; label: string; value: string; sub?: string }) {
+export function Pulse({ dot, label, value, sub }: { dot: string; label: string; value: string; sub?: string }) {
   return (
     <div className="p-4">
       <div className="flex items-center gap-2 text-[12.5px] text-muted">

@@ -33,15 +33,49 @@ export const SLOT_HOURS = 2;
 /** A courier must confirm a pickup this many hours before the slot starts. */
 export const CONFIRM_LEAD_HOURS = 2;
 
-/** Slot start/end for a requested day and start hour. */
-export function slotWindow(now: Date, day: 'today' | 'tomorrow', startHour: number) {
-  const slotStart = istAt(now, startHour, day === 'today' ? 0 : 1);
+/**
+ * Couriers do not pick up on Sundays or national holidays. The list can be
+ * replaced with PICKUP_HOLIDAYS=YYYY-MM-DD,YYYY-MM-DD (review it every year).
+ */
+export const DEFAULT_PICKUP_HOLIDAYS = ['2026-01-26', '2026-03-04', '2026-08-15', '2026-10-02', '2026-11-08', '2027-01-26'];
+
+function holidays(): string[] {
+  const env = process.env.PICKUP_HOLIDAYS;
+  return env ? env.split(',').map((d) => d.trim()) : DEFAULT_PICKUP_HOLIDAYS;
+}
+
+/** YYYY-MM-DD of the IST day containing `at`. */
+export function istDateKey(at: Date): string {
+  const { y, m, d } = istDate(at);
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/** Why couriers will not pick up on this IST day, or null on a working day. */
+export function closedReason(at: Date): string | null {
+  if (new Date(at.getTime() + IST_OFFSET_MS).getUTCDay() === 0) return 'Sunday';
+  return holidays().includes(istDateKey(at)) ? 'Holiday' : null;
+}
+
+/** Days from today (IST) to the next working day after today. */
+export function nextWorkingDayOffset(now: Date): number {
+  for (let day = 1; day < 15; day++) if (!closedReason(istAt(now, 12, day))) return day;
+  return 1;
+}
+
+/**
+ * Slot start/end for a requested day and start hour.
+ * 'next' is the next working day; 'tomorrow' is kept for older clients.
+ */
+export function slotWindow(now: Date, day: 'today' | 'tomorrow' | 'next', startHour: number) {
+  const offset = day === 'today' ? 0 : day === 'tomorrow' ? 1 : nextWorkingDayOffset(now);
+  const slotStart = istAt(now, startHour, offset);
   return { slotStart, slotEnd: new Date(slotStart.getTime() + SLOT_HOURS * HOUR) };
 }
 
-/** The earliest slot the courier can still confirm (2 hours ahead). */
+/** The earliest slot the courier can still confirm (2 hours ahead), on a working day. */
 export function nextBookableSlot(now: Date): { slotStart: Date; slotEnd: Date } {
-  for (let day = 0; day < 3; day++) {
+  for (let day = 0; day < 15; day++) {
+    if (closedReason(istAt(now, 12, day))) continue;
     for (const h of SLOT_STARTS) {
       const slotStart = istAt(now, h, day);
       if (slotStart.getTime() - now.getTime() >= CONFIRM_LEAD_HOURS * HOUR) {
@@ -56,7 +90,8 @@ export function nextBookableSlot(now: Date): { slotStart: Date; slotEnd: Date } 
 export function slotAfter(slotStart: Date): { slotStart: Date; slotEnd: Date } {
   const h = istHour(slotStart);
   const later = SLOT_STARTS.find((s) => s > h);
-  const start = later !== undefined ? istAt(slotStart, later) : istAt(slotStart, SLOT_STARTS[0], 1);
+  let start = later !== undefined ? istAt(slotStart, later) : istAt(slotStart, SLOT_STARTS[0], 1);
+  while (closedReason(start)) start = istAt(start, SLOT_STARTS[0], 1);
   return { slotStart: start, slotEnd: new Date(start.getTime() + SLOT_HOURS * HOUR) };
 }
 

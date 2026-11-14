@@ -2,11 +2,13 @@ import 'dotenv/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { signedIn } from './sign-in.js';
 import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
 
 describe('API (e2e)', () => {
   let app: INestApplication<App>;
+  let agent: Awaited<ReturnType<typeof signedIn>>;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -15,6 +17,7 @@ describe('API (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
     await app.init();
+    agent = await signedIn(app.getHttpServer());
   });
 
   afterAll(async () => {
@@ -29,13 +32,13 @@ describe('API (e2e)', () => {
   });
 
   it('GET /api/couriers lists all 8 demo couriers', async () => {
-    const res = await request(app.getHttpServer()).get('/api/couriers').expect(200);
+    const res = await agent.get('/api/couriers').expect(200);
     expect(res.body).toHaveLength(8);
     expect(res.body.every((c: { mode: string }) => c.mode === 'DEMO')).toBe(true);
   });
 
   it('POST /api/couriers/rates rejects a bad pin code', () => {
-    return request(app.getHttpServer())
+    return agent
       .post('/api/couriers/rates')
       .send({
         originPincode: '12',
@@ -63,26 +66,26 @@ describe('API (e2e)', () => {
   };
 
   it('POST /api/couriers/:code/book returns an AWB, and the same key returns the same AWB', async () => {
-    const first = await request(app.getHttpServer()).post('/api/couriers/ekart/book').send(booking).expect(201);
+    const first = await agent.post('/api/couriers/ekart/book').send(booking).expect(201);
     expect(first.body).toMatchObject({ courierCode: 'EKART', mode: 'DEMO' });
     expect(first.body.awb).toMatch(/^FMPC/);
-    const again = await request(app.getHttpServer()).post('/api/couriers/ekart/book').send(booking).expect(201);
+    const again = await agent.post('/api/couriers/ekart/book').send(booking).expect(201);
     expect(again.body.awb).toBe(first.body.awb);
   });
 
   it('POST /api/couriers/:code/book refuses a courier that does not deliver there', () => {
-    return request(app.getHttpServer()).post('/api/couriers/blitz/book').send(booking).expect(400);
+    return agent.post('/api/couriers/blitz/book').send(booking).expect(400);
   });
 
   it('POST /api/couriers/:code/book refuses a missing order number', () => {
-    return request(app.getHttpServer())
+    return agent
       .post('/api/couriers/ekart/book')
       .send({ ...booking, orderNumber: '' })
       .expect(400);
   });
 
   it('POST /api/couriers/rates returns quotes, cheapest serviceable first', async () => {
-    const res = await request(app.getHttpServer())
+    const res = await agent
       .post('/api/couriers/rates')
       .send({
         originPincode: '400097',

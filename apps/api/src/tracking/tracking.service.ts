@@ -148,6 +148,8 @@ export class TrackingService {
     const data = { title: f.title, message: f.message, action: f.action, dueAt: f.dueAt, ownerId: owner?.id };
     // One flag per problem per shipment: a problem that comes back reopens its flag.
     const earlier = await this.prisma.redFlag.findFirst({ where: { type, shipmentId } });
+    // Someone closed this problem by hand: it stays closed for the same status.
+    if (earlier?.resolvedAt && earlier.actedAt && earlier.actedAt.getTime() === earlier.resolvedAt.getTime()) return;
     if (earlier) {
       await this.prisma.redFlag.update({ where: { id: earlier.id }, data: { ...data, resolvedAt: null } });
     } else {

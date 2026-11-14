@@ -40,25 +40,42 @@ enum Role {
 }
 
 model User {
-  id          String   @id @default(cuid())
-  brandId     String
-  brand       Brand    @relation(fields: [brandId], references: [id])
-  name        String
-  phone       String
-  email       String?
-  role        Role
-  managerId   String?
-  manager     User?    @relation("ManagerReports", fields: [managerId], references: [id])
-  reports     User[]   @relation("ManagerReports")
-  warehouseId String? // set for VENDOR users
-  courierCode String? // set for COURIER users
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  id           String    @id @default(cuid())
+  brandId      String
+  brand        Brand     @relation(fields: [brandId], references: [id])
+  name         String
+  phone        String
+  email        String?   @unique // sign-in: email + password, then a one-time code
+  role         Role
+  managerId    String?
+  manager      User?     @relation("ManagerReports", fields: [managerId], references: [id])
+  reports      User[]    @relation("ManagerReports")
+  warehouseId  String? // set for VENDOR users
+  courierCode  String? // set for COURIER users
+  active       Boolean   @default(true)
+  passwordHash String? // scrypt; mobile + password until SMS OTP is connected
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
 
   ownedTasks Task[]    @relation("TaskOwner")
   ownedFlags RedFlag[] @relation("FlagOwner")
+  challenges LoginChallenge[]
 
   @@unique([brandId, phone])
+}
+
+/// Step 2 of sign-in: a 6-digit code sent after the password is right.
+model LoginChallenge {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  codeHash  String
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
 }
 
 // ---------- Places ----------
@@ -200,6 +217,7 @@ model Shipment {
   status           ShipmentStatus @default(BOOKED)
   chargedAmount    Decimal        @db.Decimal(12, 2)
   chargedWeightG   Int
+  courierWeightG   Int? // weight the courier measured at pickup; above chargedWeightG = weight dispute
   labelUrl         String?
   packingProofUrls String[]
   expectedDelivery DateTime?
@@ -322,6 +340,8 @@ model RedFlag {
   owner      User?        @relation("FlagOwner", fields: [ownerId], references: [id])
   dueAt      DateTime?
   action     String? // the one-tap fix shown in "Needs you"
+  note       String? // what was done, e.g. 'RCA sent to Ekart'
+  actedAt    DateTime?
   resolvedAt DateTime?
   createdAt  DateTime     @default(now())
 

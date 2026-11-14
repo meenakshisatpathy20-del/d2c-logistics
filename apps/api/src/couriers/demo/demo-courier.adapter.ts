@@ -90,6 +90,10 @@ export class DemoCourierAdapter implements CourierAdapter {
     };
   }
 
+  async cancel(awb: string): Promise<{ cancelled: boolean }> {
+    return { cancelled: awb.startsWith(this.profile.awbPrefix) };
+  }
+
   /**
    * Simulated journey. The AWB decides the outcome, so a demo shipment
    * always tells the same story:

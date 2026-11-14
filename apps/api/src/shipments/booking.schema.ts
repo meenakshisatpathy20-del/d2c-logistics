@@ -31,7 +31,7 @@ export const BookOrderSchema = z.object({
   /** Leave empty for the earliest slot the courier can still confirm. */
   slot: z
     .object({
-      day: z.enum(['today', 'tomorrow']),
+      day: z.enum(['today', 'tomorrow', 'next']), // next = next working day
       startHour: z.number().int().refine((h) => (SLOT_STARTS as readonly number[]).includes(h), 'Unknown pickup slot'),
     })
     .optional(),

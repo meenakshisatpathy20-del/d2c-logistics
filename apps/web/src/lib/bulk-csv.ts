@@ -20,10 +20,16 @@ export const BULK_COLUMNS = [
   "rto_warehouse_id",
 ] as const;
 
-/** Optional: the advance a COD customer already paid online (Rs 49 / Rs 99 at D2C Mall). */
-export const OPTIONAL_COLUMNS = ["advance_paid"] as const;
+/**
+ * Optional: which of our brands the order is for and the product (shown in
+ * Orders and on reports), and the advance a COD customer already paid online
+ * (Rs 49 / Rs 99 at D2C Mall).
+ */
+export const OPTIONAL_COLUMNS = ["brand", "product", "advance_paid"] as const;
 
 export type BulkRow = Record<(typeof BULK_COLUMNS)[number], string> & {
+  brand: string;
+  product: string;
   advance_paid: string;
   line: number;
   errors: string[];
@@ -63,8 +69,8 @@ export function parseBulkCsv(text: string, knownWarehouses: string[], seenOrderI
       (typeof BULK_COLUMNS)[number],
       string
     >;
-    const advanceCol = header.indexOf("advance_paid");
-    const row: BulkRow = { ...values, advance_paid: advanceCol >= 0 ? (cells[advanceCol] ?? "") : "", line: i + 2, errors: [] };
+    const optional = (c: (typeof OPTIONAL_COLUMNS)[number]) => (header.includes(c) ? (cells[header.indexOf(c)] ?? "") : "");
+    const row: BulkRow = { ...values, brand: optional("brand"), product: optional("product"), advance_paid: optional("advance_paid"), line: i + 2, errors: [] };
 
     if (!row.order_id) row.errors.push("Order ID is empty");
     else if (ids.has(row.order_id)) row.errors.push("Duplicate order ID");
@@ -91,17 +97,17 @@ export function parseBulkCsv(text: string, knownWarehouses: string[], seenOrderI
   });
 }
 
-export const SAMPLE_BULK_CSV = `${BULK_COLUMNS.join(",")}
-18910,Mansi K.,9876501234,"Shop 6, Dadar West",Mumbai,Maharashtra,400028,Prepaid,1440,4.5,30,25,15,WHFQFV,WHFQFV
-18911,Rahul S.,9812345670,"Flat 3B, Sector 18",Noida,Uttar Pradesh,201301,COD,799,0.6,20,15,8,D2CNOI,D2CNOI
-18912,Ayesha F.,98123,"MG Road",Bengaluru,Karnataka,560001,COD,1199,0.8,25,20,10,WHUY73,WHUY73
-18913,Vikram R.,9900112233,"Banjara Hills",Hyderabad,Telangana,500034,Prepaid,2599,1.2,30,20,12,WHZZZZ,WHTO34
-18914,Pooja L.,9988776655,"Salt Lake Sector 5",Kolkata,West Bengal,700091,Prepaid,649,0.4,20,15,6,WHTO34,WHTO34`;
+export const SAMPLE_BULK_CSV = `${BULK_COLUMNS.join(",")},brand,product
+18910,Mansi K.,9876501234,"Shop 6, Dadar West",Mumbai,Maharashtra,400028,Prepaid,1440,4.5,30,25,15,WHFQFV,WHFQFV,AccessHer,Pearl drop earrings
+18911,Rahul S.,9812345670,"Flat 3B, Sector 18",Noida,Uttar Pradesh,201301,COD,799,0.6,20,15,8,D2CNOI,D2CNOI,Kasrat,Resistance bands
+18912,Ayesha F.,98123,"MG Road",Bengaluru,Karnataka,560001,COD,1199,0.8,25,20,10,WHUY73,WHUY73,Luxura Sciences,Vitamin C serum
+18913,Vikram R.,9900112233,"Banjara Hills",Hyderabad,Telangana,500034,Prepaid,2599,1.2,30,20,12,WHZZZZ,WHTO34,Hungama HiLife,Bounce earbuds
+18914,Pooja L.,9988776655,"Salt Lake Sector 5",Kolkata,West Bengal,700091,Prepaid,649,0.4,20,15,6,WHTO34,WHTO34,Bagssy,Tote bag`;
 
 /** A sample where every row is correct, to show bulk booking end to end. */
-export const SAMPLE_BULK_CSV_CLEAN = `${BULK_COLUMNS.join(",")},advance_paid
-18920,Mansi K.,9876501234,"Shop 6, Dadar West",Mumbai,Maharashtra,400028,Prepaid,1440,1.5,30,25,15,WHFQFV,WHFQFV,
-18921,Rahul S.,9812345670,"Flat 3B, Sector 18",Noida,Uttar Pradesh,201301,COD,799,0.6,20,15,8,D2CNOI,D2CNOI,49
-18922,Ayesha F.,9812312345,"MG Road, Ashok Nagar",Bengaluru,Karnataka,560001,COD,1199,0.8,25,20,10,WHUY73,WHUY73,99
-18923,Vikram R.,9900112233,"Road 12, Banjara Hills",Hyderabad,Telangana,500034,Prepaid,2599,1.2,30,20,12,WHTO34,WHTO34,
-18924,Pooja L.,9988776655,"Salt Lake Sector 5",Kolkata,West Bengal,700091,Prepaid,649,0.4,20,15,6,WHZAE7,WHZAE7,`;
+export const SAMPLE_BULK_CSV_CLEAN = `${BULK_COLUMNS.join(",")},advance_paid,brand,product
+18920,Mansi K.,9876501234,"Shop 6, Dadar West",Mumbai,Maharashtra,400028,Prepaid,1440,1.5,30,25,15,WHFQFV,WHFQFV,,AccessHer,Pearl drop earrings
+18921,Rahul S.,9812345670,"Flat 3B, Sector 18",Noida,Uttar Pradesh,201301,COD,799,0.6,20,15,8,D2CNOI,D2CNOI,49,Kasrat,Resistance bands
+18922,Ayesha F.,9812312345,"MG Road, Ashok Nagar",Bengaluru,Karnataka,560001,COD,1199,0.8,25,20,10,WHUY73,WHUY73,99,Luxura Sciences,Vitamin C serum
+18923,Vikram R.,9900112233,"Road 12, Banjara Hills",Hyderabad,Telangana,500034,Prepaid,2599,1.2,30,20,12,WHTO34,WHTO34,,Hungama HiLife,Bounce earbuds
+18924,Pooja L.,9988776655,"Salt Lake Sector 5",Kolkata,West Bengal,700091,Prepaid,649,0.4,20,15,6,WHZAE7,WHZAE7,,Bagssy,Tote bag`;

@@ -1,22 +1,46 @@
 "use client";
 
 import clsx from "clsx";
-import { Bell, ChartNoAxesColumn, Handshake, Inbox, Plus, Sun, Waypoints } from "lucide-react";
+import {
+  Calculator,
+  ChartNoAxesColumn,
+  House,
+  IndianRupee,
+  LogOut,
+  Menu,
+  Package,
+  Plus,
+  RotateCcw,
+  Scale,
+  Search,
+  Settings,
+  Truck,
+  Upload,
+  X,
+} from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { createContext, type ReactNode, useCallback, useContext, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { createContext, type ReactNode, Suspense, useCallback, useContext, useEffect, useState } from "react";
 import { BookingPanel } from "@/components/booking/booking-panel";
 import { Logo } from "@/components/ui/logo";
+import { getMe, getOrders, logout, type Me } from "@/lib/api";
+import { useLive } from "@/lib/use-live";
+
+type Counts = Partial<Record<string, number>>;
 
 const NAV = [
-  { href: "/", label: "Today", icon: Sun, ready: true },
-  { href: "/shipments", label: "Shipments", icon: Waypoints, ready: true },
-  { href: "/inbox", label: "Inbox", icon: Inbox, ready: false, count: 4 },
-  { href: "/partners", label: "Partners", icon: Handshake, ready: false },
-  { href: "/insights", label: "Insights", icon: ChartNoAxesColumn, ready: false },
-];
+  { href: "/", label: "Home", icon: House },
+  { href: "/orders", label: "Orders", icon: Package, count: (c: Counts) => c.NEW, tone: "orange" },
+  { href: "/pickups", label: "Pickups", icon: Truck },
+  { href: "/ndr", label: "NDR & Returns", icon: RotateCcw, count: (c: Counts) => c.ATTENTION, tone: "red" },
+  { href: "/weight", label: "Weight disputes", icon: Scale },
+  { href: "/payments", label: "Payments & COD", icon: IndianRupee },
+  { href: "/rates", label: "Rate calculator", icon: Calculator },
+  { href: "/reports", label: "Reports", icon: ChartNoAxesColumn },
+  { href: "/settings", label: "Settings", icon: Settings },
+] as const;
 
-type ShellActions = { openBooking: () => void };
+type ShellActions = { openBooking: (mode?: "single" | "bulk") => void };
 const ShellContext = createContext<ShellActions>({ openBooking: () => {} });
 export const useShell = () => useContext(ShellContext);
 
@@ -24,113 +48,183 @@ function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
+const loadCounts = () => getOrders({ size: 5 });
+
 export function AppShell({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
-  const [booking, setBooking] = useState(false);
-  const openBooking = useCallback(() => setBooking(true), []);
+  const [booking, setBooking] = useState<null | "single" | "bulk">(null);
+  const [drawer, setDrawer] = useState(false);
+  const [me, setMe] = useState<Me | null>(null);
+  const { data } = useLive(loadCounts, 30_000);
+  const counts: Counts = data?.counts ?? {};
+  const openBooking = useCallback((mode: "single" | "bulk" = "single") => setBooking(mode), []);
+
+  useEffect(() => {
+    getMe().then(setMe, () => {});
+  }, []);
+
+  const nav = (onPick?: () => void) => (
+    // The current page is only known at request time on order pages, so it streams in.
+    <Suspense fallback={<NavLinks counts={counts} pathname={null} onPick={onPick} />}>
+      <ActiveNav counts={counts} onPick={onPick} />
+    </Suspense>
+  );
+
+  const userCard = (
+    <div className="flex items-center gap-3 rounded-xl bg-white/5 p-3">
+      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-blue text-[12px] font-semibold text-white">
+        {(me?.name ?? "··").split(" ").map((w) => w[0]).slice(0, 2).join("")}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-semibold text-white">{me?.name ?? "Signed in"}</span>
+        <span className="block truncate text-[11.5px] text-white/50">{me?.email ?? ""}</span>
+      </span>
+      <button
+        onClick={async () => {
+          await logout().catch(() => {});
+          window.location.replace("/login"); // full reload clears every screen's data
+        }}
+        className="grid size-8 place-items-center rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+        aria-label="Sign out"
+        title="Sign out"
+      >
+        <LogOut size={16} />
+      </button>
+    </div>
+  );
 
   return (
     <ShellContext.Provider value={{ openBooking }}>
-      <div className="min-h-screen pb-20 md:pb-0">
-        <header className="sticky top-0 z-30 border-b border-line bg-white/90 backdrop-blur">
-          <div className="mx-auto flex h-16 max-w-[1440px] items-center gap-4 px-4 sm:px-6">
-            <Link href="/" aria-label="Today" className="shrink-0">
-              <Logo compact />
-            </Link>
+      <div className="min-h-screen lg:pl-[248px]">
+        {/* Desktop menu */}
+        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col bg-navy px-3 py-4 lg:flex">
+          <Link href="/" className="mb-6 block rounded-xl bg-white px-3 py-2.5" aria-label="Home">
+            <Logo compact />
+          </Link>
+          <div className="flex-1 overflow-y-auto">{nav()}</div>
+          {userCard}
+        </aside>
 
-            <nav aria-label="Main" className="ml-4 hidden items-center gap-1 md:flex">
-              {NAV.map(({ href, label, icon: Icon, ready, count }) => {
-                const active = isActive(pathname, href);
-                return (
-                  <Link
-                    key={href}
-                    href={ready ? href : pathname}
-                    aria-current={active ? "page" : undefined}
-                    aria-disabled={!ready}
-                    title={ready ? undefined : "Coming next"}
-                    className={clsx(
-                      "relative flex items-center gap-2 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-colors",
-                      active ? "text-navy" : ready ? "text-muted hover:bg-page hover:text-ink" : "text-faint",
-                    )}
-                  >
-                    <Icon size={16} className={active ? "text-brand-orange" : undefined} />
-                    {label}
-                    {count ? (
-                      <span className="grid min-w-4 place-items-center rounded-full bg-flag-red px-1 text-[10px] font-bold text-white">
-                        {count}
-                      </span>
-                    ) : null}
-                    {active ? <span className="absolute inset-x-3 -bottom-[13px] h-0.5 rounded-full bg-brand-orange" /> : null}
-                  </Link>
-                );
-              })}
-            </nav>
+        {/* Phone menu */}
+        {drawer ? (
+          <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+            <button className="absolute inset-0 bg-navy/40" aria-label="Close menu" onClick={() => setDrawer(false)} />
+            <aside className="absolute inset-y-0 left-0 flex w-[272px] flex-col bg-navy px-3 py-4">
+              <div className="mb-5 flex items-center gap-2">
+                <span className="flex-1 rounded-xl bg-white px-3 py-2">
+                  <Logo compact />
+                </span>
+                <button className="grid size-9 place-items-center rounded-lg text-white/70" onClick={() => setDrawer(false)} aria-label="Close menu">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">{nav(() => setDrawer(false))}</div>
+              {userCard}
+            </aside>
+          </div>
+        ) : null}
 
+        <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur">
+          <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-3 px-4 sm:px-6">
+            <button className="grid size-10 place-items-center rounded-lg text-ink-2 hover:bg-page lg:hidden" onClick={() => setDrawer(true)} aria-label="Open menu">
+              <Menu size={20} />
+            </button>
+            <GlobalSearch />
             <button
-              onClick={openBooking}
-              className="ml-auto hidden h-10 items-center gap-2 rounded-xl bg-brand-orange px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-orange-dark sm:flex"
+              onClick={() => openBooking("bulk")}
+              className="ml-auto hidden h-10 items-center gap-2 rounded-xl border border-line bg-white px-3.5 text-sm font-medium text-ink-2 hover:bg-page md:flex"
             >
-              <Plus size={17} /> New shipment
+              <Upload size={16} /> Bulk upload
             </button>
-
-            <button className="relative ml-auto grid size-10 place-items-center rounded-xl text-ink-2 hover:bg-page sm:ml-0" aria-label="4 alerts">
-              <Bell size={18} />
-              <span className="absolute right-2 top-2 size-2 rounded-full bg-flag-red ring-2 ring-white" />
-            </button>
-            <div
-              className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-blue text-[12.5px] font-semibold text-white"
-              title="Ops Manager · D2C Ecommerce India"
+            <button
+              onClick={() => openBooking("single")}
+              className="ml-auto flex h-10 shrink-0 items-center gap-2 rounded-xl bg-brand-orange px-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-orange-dark md:ml-0"
             >
-              OM
-            </div>
+              <Plus size={17} /> <span className="hidden sm:inline">Create order</span>
+            </button>
           </div>
         </header>
 
-        <main className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:py-8">{children}</main>
+        <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:py-8">{children}</main>
 
-        {/* Phone: bottom tabs with a centre "new" button */}
-        <nav
-          aria-label="Main"
-          className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-white pb-[env(safe-area-inset-bottom)] md:hidden"
-        >
-          {NAV.slice(0, 2).map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={clsx(
-                "flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium",
-                isActive(pathname, href) ? "text-brand-orange" : "text-muted",
-              )}
-            >
-              <Icon size={20} />
-              {label}
-            </Link>
-          ))}
-          <button onClick={openBooking} className="flex flex-col items-center justify-center" aria-label="New shipment">
-            <span className="-mt-6 grid size-12 place-items-center rounded-2xl bg-brand-orange text-white shadow-lg">
-              <Plus size={22} />
-            </span>
-          </button>
-          {NAV.slice(2, 4).map(({ href, label, icon: Icon }) => (
-            <span key={href} className="flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium text-faint">
-              <Icon size={20} />
-              {label}
-            </span>
-          ))}
-        </nav>
-
-        <BookingPanel open={booking} onClose={() => setBooking(false)} />
+        {booking ? <BookingPanel key={booking} open initialMode={booking} onClose={() => setBooking(null)} /> : null}
       </div>
     </ShellContext.Provider>
+  );
+}
+
+function ActiveNav(props: { counts: Counts; onPick?: () => void }) {
+  return <NavLinks {...props} pathname={usePathname()} />;
+}
+
+function NavLinks({ counts, pathname, onPick }: { counts: Counts; pathname: string | null; onPick?: () => void }) {
+  return (
+    <nav aria-label="Main" className="space-y-0.5">
+      {NAV.map((item) => {
+        const active = pathname !== null && isActive(pathname, item.href);
+        const n = "count" in item ? item.count(counts) : undefined;
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={onPick}
+            aria-current={active ? "page" : undefined}
+            className={clsx(
+              "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13.5px] font-medium transition-colors",
+              active ? "bg-white/10 text-white" : "text-white/65 hover:bg-white/5 hover:text-white",
+            )}
+          >
+            <Icon size={17} className={active ? "text-brand-orange" : "text-white/50 group-hover:text-white/80"} />
+            <span className="flex-1">{item.label}</span>
+            {n ? (
+              <span
+                className={clsx(
+                  "min-w-5 rounded-full px-1.5 text-center text-[11px] font-bold leading-5 text-white",
+                  "tone" in item && item.tone === "red" ? "bg-flag-red" : "bg-brand-orange",
+                )}
+              >
+                {n}
+              </span>
+            ) : null}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+/** One box finds any order by order number, AWB, customer phone or name. */
+function GlobalSearch() {
+  const router = useRouter();
+  const [q, setQ] = useState("");
+  return (
+    <form
+      role="search"
+      className="relative min-w-0 flex-1 md:max-w-md"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const term = q.trim();
+        router.push(term ? `/orders?tab=ALL&q=${encodeURIComponent(term)}` : "/orders");
+      }}
+    >
+      <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search AWB, order no. or phone"
+        aria-label="Search orders"
+        className="h-10 w-full rounded-xl border border-line bg-page pl-9 pr-3 text-sm text-ink placeholder:text-faint focus:border-brand-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-blue/15"
+      />
+    </form>
   );
 }
 
 export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="font-display text-[28px] font-bold tracking-tight text-navy">{title}</h1>
-        {subtitle ? <p className="mt-1 text-[14.5px] text-muted">{subtitle}</p> : null}
+      <div className="min-w-0">
+        <h1 className="font-display text-[26px] font-bold tracking-tight text-navy">{title}</h1>
+        {subtitle ? <p className="mt-1 text-[14px] text-muted">{subtitle}</p> : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </div>

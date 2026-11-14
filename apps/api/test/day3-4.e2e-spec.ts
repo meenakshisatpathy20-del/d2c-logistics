@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import request from 'supertest';
+import { signedIn } from './sign-in.js';
 import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
 import { JobsService } from './../src/jobs/jobs.service.js';
@@ -27,11 +27,11 @@ const order = (n: string) => ({
   lengthCm: 20,
   breadthCm: 15,
   heightCm: 8,
-  slot: { day: 'tomorrow', startHour: 10 },
 });
 
 describe('Day 3-4: bookings, documents, pickups, today (e2e)', () => {
   let app: INestApplication<App>;
+  let agent: Awaited<ReturnType<typeof signedIn>>;
   let prisma: PrismaService;
 
   beforeAll(async () => {
@@ -39,6 +39,7 @@ describe('Day 3-4: bookings, documents, pickups, today (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
     await app.init();
+    agent = await signedIn(app.getHttpServer());
     prisma = app.get(PrismaService);
   });
 
@@ -48,12 +49,13 @@ describe('Day 3-4: bookings, documents, pickups, today (e2e)', () => {
 
   it('books an order, saves it, and the same key returns the same booking', async () => {
     const body = { ...order('A'), idempotencyKey: `e2e-${run}-A` };
-    const first = await request(app.getHttpServer()).post('/api/shipments').send(body).expect(201);
+    const first = await agent.post('/api/shipments').send(body).expect(201);
     expect(first.body).toMatchObject({ orderNumber: body.orderNumber, mode: 'DEMO' });
     expect(first.body.awb).toBeTruthy();
-    expect(first.body.pickupSlot.label).toBe('10 am–12 pm');
+    // The earliest open slot on a working day, 2+ hours ahead.
+    expect(first.body.pickupSlot.label).toMatch(/^\d+ (am|pm)–\d+ (am|pm)$/);
 
-    const again = await request(app.getHttpServer()).post('/api/shipments').send(body).expect(201);
+    const again = await agent.post('/api/shipments').send(body).expect(201);
     expect(again.body.id).toBe(first.body.id);
 
     const saved = await prisma.shipment.findUniqueOrThrow({ where: { id: first.body.id }, include: { events: true, pickup: true } });
@@ -64,7 +66,7 @@ describe('Day 3-4: bookings, documents, pickups, today (e2e)', () => {
   });
 
   it('refuses to book an order that is already booked under a different key', async () => {
-    const res = await request(app.getHttpServer())
+    const res = await agent
       .post('/api/shipments')
       .send({ ...order('A'), idempotencyKey: `e2e-${run}-A-again` })
       .expect(409);
@@ -72,32 +74,32 @@ describe('Day 3-4: bookings, documents, pickups, today (e2e)', () => {
   });
 
   it('refuses a bad mobile number and an unknown warehouse', async () => {
-    await request(app.getHttpServer())
+    await agent
       .post('/api/shipments')
       .send({ ...order('B'), customerPhone: '12345', idempotencyKey: `e2e-${run}-B` })
       .expect(400);
-    await request(app.getHttpServer())
+    await agent
       .post('/api/shipments')
       .send({ ...order('C'), warehouseCode: 'NOPE', idempotencyKey: `e2e-${run}-C` })
       .expect(400);
   });
 
   it('shows the booking on the board and serves label and manifest PDFs', async () => {
-    const board = await request(app.getHttpServer()).get('/api/shipments').expect(200);
+    const board = await agent.get('/api/shipments').expect(200);
     const card = board.body.find((c: { orderNumber: string }) => c.orderNumber === `E2E-${run}-A`);
     expect(card).toMatchObject({ brand: 'AccessHer', lane: 'TO_PACK', payment: 'COD' });
 
-    const label = await request(app.getHttpServer()).get(card.labelUrl).expect(200);
+    const label = await agent.get(card.labelUrl).expect(200);
     expect(label.headers['content-type']).toMatch(/application\/pdf/);
     expect(label.body.subarray(0, 4).toString()).toBe('%PDF');
 
     const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: card.id } });
-    const manifest = await request(app.getHttpServer()).get(`/api/pickups/${shipment.pickupId}/manifest.pdf`).expect(200);
+    const manifest = await agent.get(`/api/pickups/${shipment.pickupId}/manifest.pdf`).expect(200);
     expect(manifest.body.subarray(0, 4).toString()).toBe('%PDF');
   });
 
   it('books a bulk file row by row, keeping bad rows out', async () => {
-    const res = await request(app.getHttpServer())
+    const res = await agent
       .post('/api/shipments/bulk')
       .send({
         batchKey: `e2e-batch-${run}`,
@@ -110,7 +112,7 @@ describe('Day 3-4: bookings, documents, pickups, today (e2e)', () => {
   });
 
   it('pickup rules: a courier that never confirms gets its parcels moved and a red flag raised', async () => {
-    const booked = await request(app.getHttpServer())
+    const booked = await agent
       .post('/api/shipments')
       .send({ ...order('G'), courierCode: 'XPRESSBEES', idempotencyKey: `e2e-${run}-G` })
       .expect(201);
@@ -138,7 +140,7 @@ describe('Day 3-4: bookings, documents, pickups, today (e2e)', () => {
   });
 
   it('advance COD: the courier collects only the balance, and the label says so', async () => {
-    const res = await request(app.getHttpServer())
+    const res = await agent
       .post('/api/shipments')
       .send({ ...order('H'), orderValue: 1299, codAmount: 1299, codAdvance: 99, idempotencyKey: `e2e-${run}-H` })
       .expect(201);
@@ -147,17 +149,17 @@ describe('Day 3-4: bookings, documents, pickups, today (e2e)', () => {
     expect(Number(s.order.codAdvance)).toBe(99);
     expect(s.order.advanceStatus).toBe('PAID');
 
-    const policy = await request(app.getHttpServer()).get('/api/cod-advance?orderValue=1299').expect(200);
+    const policy = await agent.get('/api/cod-advance?orderValue=1299').expect(200);
     expect(policy.body.advance).toBe(99);
 
-    await request(app.getHttpServer())
+    await agent
       .post('/api/shipments')
       .send({ ...order('I'), orderValue: 40, codAdvance: 49, idempotencyKey: `e2e-${run}-I` })
       .expect(400);
   });
 
   it('today returns needs-you items, pickups, pulse and brands', async () => {
-    const res = await request(app.getHttpServer()).get('/api/today').expect(200);
+    const res = await agent.get('/api/today').expect(200);
     expect(res.body).toHaveProperty('summary.pickupsDue');
     expect(Array.isArray(res.body.needsYou)).toBe(true);
     expect(Array.isArray(res.body.pickups)).toBe(true);

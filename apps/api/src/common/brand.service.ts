@@ -21,7 +21,7 @@ export class BrandService {
   }
 
   /** The person who owns a kind of problem, by role. */
-  async ownerFor(role: 'OPS' | 'SUPPORT'): Promise<{ id: string; name: string } | null> {
+  async ownerFor(role: 'OPS' | 'SUPPORT' | 'FINANCE'): Promise<{ id: string; name: string } | null> {
     const brandId = await this.currentBrandId();
     const users = await this.prisma.user.findMany({
       where: { brandId, role, active: true },

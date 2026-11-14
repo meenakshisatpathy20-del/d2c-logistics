@@ -26,3 +26,10 @@ services:
         fromDatabase:
           name: d2c-logistics-db
           property: connectionString
+      # Signs the sign-in cookie. Render makes a random value once.
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: REQUIRE_SESSION_SECRET
+        value: "true"
+      - key: COOKIE_SECURE
+        value: "true"

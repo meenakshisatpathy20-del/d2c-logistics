@@ -14,11 +14,14 @@ export const CONFIRM_LEAD_HOURS = 2;
 
 export type SlotOption = {
   key: string;
-  day: "today" | "tomorrow";
-  dayLabel: "Today" | "Tomorrow";
+  day: "today" | "next";
+  dayLabel: string;
   start: number;
   label: string;
 };
+
+/** Couriers do not pick up on Sundays or these holidays (same list as the API). */
+const HOLIDAYS = ["2026-01-26", "2026-03-04", "2026-08-15", "2026-10-02", "2026-11-08", "2027-01-26"];
 
 /** Current hour in India (13:30 -> 13.5). */
 export function istHourNow(now: Date): number {
@@ -28,22 +31,33 @@ export function istHourNow(now: Date): number {
   return Number(parts.hour) + Number(parts.minute) / 60;
 }
 
+/** The IST calendar day `offset` days from now, as a Date at noon UTC of that day. */
+function istDay(now: Date, offset: number): Date {
+  const ist = new Date(now.getTime() + 5.5 * 3600_000);
+  return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + offset, 12));
+}
+
+export function isWorkingDay(day: Date): boolean {
+  return day.getUTCDay() !== 0 && !HOLIDAYS.includes(day.toISOString().slice(0, 10));
+}
+
 export function slotOptions(now: Date): SlotOption[] {
   const hour = istHourNow(now);
-  const today = SLOTS.filter((s) => s.start - hour >= CONFIRM_LEAD_HOURS).map((s) => ({
-    key: `today-${s.start}`,
-    day: "today" as const,
-    dayLabel: "Today" as const,
-    start: s.start,
-    label: s.label,
-  }));
-  const tomorrow = SLOTS.map((s) => ({
-    key: `tomorrow-${s.start}`,
-    day: "tomorrow" as const,
-    dayLabel: "Tomorrow" as const,
-    start: s.start,
-    label: s.label,
-  }));
-  // Always four choices: what is left today, then tomorrow.
-  return [...today, ...tomorrow].slice(0, 4);
+  const today = isWorkingDay(istDay(now, 0))
+    ? SLOTS.filter((s) => s.start - hour >= CONFIRM_LEAD_HOURS).map((s) => ({
+        key: `today-${s.start}`,
+        day: "today" as const,
+        dayLabel: "Today",
+        start: s.start,
+        label: s.label,
+      }))
+    : [];
+  let offset = 1;
+  while (!isWorkingDay(istDay(now, offset)) && offset < 15) offset++;
+  const next = istDay(now, offset);
+  const nextLabel =
+    offset === 1 ? "Tomorrow" : next.toLocaleDateString("en-IN", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
+  const later = SLOTS.map((s) => ({ key: `next-${s.start}`, day: "next" as const, dayLabel: nextLabel, start: s.start, label: s.label }));
+  // Always four choices: what is left today, then the next working day.
+  return [...today, ...later].slice(0, 4);
 }

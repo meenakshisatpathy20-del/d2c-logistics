@@ -38,6 +38,23 @@ One web service runs both the website and the API: the website forwards `/api/*`
 
 `render.yaml` sets all of this up in one step (Render → New → Blueprint). Every push to `main` redeploys automatically.
 
+### Sign-in
+
+Team members sign in with work email + password, then a 6-digit code. Until email
+delivery is connected (`OTP_DELIVERY=demo`, the default) the code is shown on screen.
+Demo logins: `founder@d2c.demo`, `ops.manager@d2c.demo`, `ops@d2c.demo`,
+`support@d2c.demo`, `finance@d2c.demo`, password `D2C@demo2026` (or `DEMO_PASSWORD`).
+On Render set `SESSION_SECRET` (any long random text), `REQUIRE_SESSION_SECRET=true`
+and `COOKIE_SECURE=true`, and set `DEMO_PASSWORD` to a private value before the first deploy.
+Everyone can change their password in Settings; an admin can reset a forgotten one.
+
+### Free plan sleep
+
+The free plan sleeps after 15 idle minutes, which pauses the pickup and tracking
+rules. They catch up as soon as the service wakes (they run once at start-up).
+To keep it awake, point a free uptime monitor (e.g. UptimeRobot) at
+`/api/health` every 10 minutes, or move to a paid instance.
+
 ## Checks
 
 ```bash

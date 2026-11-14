@@ -21,6 +21,7 @@ export class CouriersService {
       code: a.code,
       name: a.name,
       mode: a.mode,
+      pickupOnTimePct: this.pickupOnTimePct(a.code),
     }));
   }
 

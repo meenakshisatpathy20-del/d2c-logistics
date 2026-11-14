@@ -5,6 +5,7 @@
  * contact names and phone numbers are placeholders.
  */
 import 'dotenv/config';
+import { hashPassword } from '../src/auth/passwords.js';
 import { BrandService } from '../src/common/brand.service.js';
 import { codAdvanceFor } from '../src/common/cod-advance.js';
 import { istAt } from '../src/common/ist.js';
@@ -33,11 +34,12 @@ async function main() {
     });
   }
 
-  const founder = await upsertUser(brand.id, 'Founder', '9000000001', 'ADMIN');
-  const opsManager = await upsertUser(brand.id, 'Ops Manager', '9000000002', 'OPS', founder.id);
-  await upsertUser(brand.id, 'Ops Executive', '9000000003', 'OPS', opsManager.id);
-  await upsertUser(brand.id, 'Support Executive', '9000000004', 'SUPPORT', opsManager.id);
-  await upsertUser(brand.id, 'Finance Executive', '9000000005', 'FINANCE', founder.id);
+  // Demo team sign-ins: <role>@d2c.demo with DEMO_PASSWORD (default below). Change before real use.
+  const founder = await upsertUser(brand.id, 'Founder', '9000000001', 'founder@d2c.demo', 'ADMIN');
+  const opsManager = await upsertUser(brand.id, 'Ops Manager', '9000000002', 'ops.manager@d2c.demo', 'OPS', founder.id);
+  await upsertUser(brand.id, 'Ops Executive', '9000000003', 'ops@d2c.demo', 'OPS', opsManager.id);
+  await upsertUser(brand.id, 'Support Executive', '9000000004', 'support@d2c.demo', 'SUPPORT', opsManager.id);
+  await upsertUser(brand.id, 'Finance Executive', '9000000005', 'finance@d2c.demo', 'FINANCE', founder.id);
 
   const warehouses = [
     { code: 'D2CNOI', name: 'D2C Main Warehouse', address: 'Sector 63', city: 'Noida', state: 'Uttar Pradesh', pincode: '201309', cluster: 'Noida' },
@@ -228,14 +230,26 @@ async function upsertUser(
   brandId: string,
   name: string,
   phone: string,
+  email: string,
   role: 'ADMIN' | 'OPS' | 'SUPPORT' | 'FINANCE',
   managerId?: string,
 ) {
-  return prisma.user.upsert({
+  const user = await prisma.user.upsert({
     where: { brandId_phone: { brandId, phone } },
     update: {},
-    create: { brandId, name, phone, role, managerId },
+    create: { brandId, name, phone, email, role, managerId },
   });
+  // Fill sign-in details once; a password someone already changed is never reset.
+  if (!user.email || !user.passwordHash) {
+    return prisma.user.update({
+      where: { id: user.id },
+      data: {
+        email: user.email ?? email,
+        passwordHash: user.passwordHash ?? (await hashPassword(process.env.DEMO_PASSWORD ?? 'D2C@demo2026')),
+      },
+    });
+  }
+  return user;
 }
 
 main()

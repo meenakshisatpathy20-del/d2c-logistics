@@ -1,10 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { BrandService } from '../common/brand.service.js';
-import { istDayStart, nextBookableSlot, slotLabel, slotWindow } from '../common/ist.js';
+import { closedReason, istDayStart, nextBookableSlot, slotAfter, slotLabel, slotWindow } from '../common/ist.js';
 import { CouriersService } from '../couriers/couriers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { BookOrder, BulkBook } from './booking.schema.js';
 import { initials, laneFor } from './lanes.js';
+import { rtoRisk } from '../common/rto-risk.js';
 
 
 @Injectable()
@@ -66,10 +67,31 @@ export class ShipmentsService {
     if (!quote) throw new BadRequestException(`Unknown courier ${input.courierCode}`);
     if (!quote.serviceable) throw new BadRequestException(`${quote.courierName} does not deliver to pin code ${input.pincode}`);
 
-    const { slotStart, slotEnd } = input.slot ? slotWindow(now, input.slot.day, input.slot.startHour) : nextBookableSlot(now);
+    let { slotStart, slotEnd } = input.slot ? slotWindow(now, input.slot.day, input.slot.startHour) : nextBookableSlot(now);
+    // A slot whose pickup already happened (or was missed) is closed to new parcels.
+    for (let i = 0; i < 12; i++) {
+      const taken = await this.prisma.pickup.findUnique({
+        where: { warehouseId_courierCode_slotStart: { warehouseId: warehouse.id, courierCode: quote.courierCode, slotStart } },
+      });
+      if (taken?.status === 'CANCELLED') {
+        // Called off because its parcels were cancelled: open it again for this one.
+        await this.prisma.pickup.update({ where: { id: taken.id }, data: { status: 'SCHEDULED' } });
+        break;
+      }
+      if (!taken || ['SCHEDULED', 'CONFIRMED'].includes(taken.status)) break;
+      if (input.slot) throw new BadRequestException(`The ${slotLabel(slotStart)} pickup is already closed. Pick a later slot.`);
+      ({ slotStart, slotEnd } = slotAfter(slotStart));
+    }
+    const closed = closedReason(slotStart);
+    if (closed) throw new BadRequestException(`Couriers do not pick up on that day (${closed}). Pick another slot.`);
     if (slotStart.getTime() - now.getTime() < 2 * 60 * 60 * 1000) {
       throw new BadRequestException('That pickup slot is too close for the courier to confirm. Pick a later slot.');
     }
+
+    const pastReturns = await this.prisma.shipment.count({
+      where: { brandId, status: { in: ['RTO_INITIATED', 'RTO_DELIVERED'] }, order: { customerPhone: input.customerPhone } },
+    });
+    const risk = rtoRisk({ paymentMode: input.paymentMode, orderValue: input.orderValue, codAdvance: advance, pincode: input.pincode, addressLine: input.addressLine, pastReturns });
 
     const adapter = this.couriers.get(quote.courierCode);
     const booked = await adapter.book({ ...rateReq, orderNumber: input.orderNumber, idempotencyKey: input.idempotencyKey }, now);
@@ -97,6 +119,7 @@ export class ShipmentsService {
         breadthCm: input.breadthCm,
         heightCm: input.heightCm,
         items: [{ name: input.productName ?? 'Order items', qty: 1, price: input.orderValue }],
+        rtoRisk: risk.score,
       };
       // An order that exists but was never booked is booked with the details entered now.
       const order = await tx.order.upsert({
@@ -185,7 +208,14 @@ export class ShipmentsService {
     const brandId = await this.brands.currentBrandId();
     const [shipments, unbooked] = await Promise.all([
       this.prisma.shipment.findMany({
-        where: { brandId, status: { not: 'CANCELLED' } },
+        // Finished parcels only from the last 7 days, so the board stays fast; the Orders list has the rest.
+        where: {
+          brandId,
+          OR: [
+            { status: { notIn: ['CANCELLED', 'DELIVERED', 'RTO_DELIVERED'] } },
+            { status: { in: ['DELIVERED', 'RTO_DELIVERED'] }, lastScanAt: { gte: new Date(Date.now() - 7 * 24 * 3600_000) } },
+          ],
+        },
         include: {
           order: { include: { pickupWarehouse: true } },
           courier: true,
@@ -196,7 +226,7 @@ export class ShipmentsService {
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.order.findMany({
-        where: { brandId, shipments: { none: {} } },
+        where: { brandId, status: { not: 'CANCELLED' }, shipments: { none: { status: { not: 'CANCELLED' } } } },
         include: { pickupWarehouse: true },
         orderBy: { createdAt: 'desc' },
       }),

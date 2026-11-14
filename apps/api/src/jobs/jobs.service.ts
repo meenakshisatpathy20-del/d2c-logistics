@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { PickupsService } from '../pickups/pickups.service.js';
 import { TrackingService } from '../tracking/tracking.service.js';
@@ -8,7 +8,7 @@ import { TrackingService } from '../tracking/tracking.service.js';
  * to check. Every minute in the demo; with live couriers tracking runs every 30.
  */
 @Injectable()
-export class JobsService {
+export class JobsService implements OnApplicationBootstrap {
   private readonly log = new Logger(JobsService.name);
   private running = false;
 
@@ -16,6 +16,14 @@ export class JobsService {
     private readonly pickups: PickupsService,
     private readonly tracking: TrackingService,
   ) {}
+
+  /**
+   * On a free host the server sleeps when idle. Running once at start-up catches
+   * up on every pickup and scan that fell due while it slept.
+   */
+  onApplicationBootstrap() {
+    setTimeout(() => void this.tick(), 3_000);
+  }
 
   @Interval(60_000)
   async tick() {

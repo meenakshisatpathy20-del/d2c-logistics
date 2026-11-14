@@ -42,17 +42,21 @@ export class PickupsService {
     // 1. Confirmation window.
     const toConfirm = await this.prisma.pickup.findMany({
       where: { brandId, status: 'SCHEDULED', slotStart: { lte: new Date(now.getTime() + CONFIRM_LEAD_HOURS * HOUR) } },
-      include: { warehouse: true, courier: true, shipments: true },
+      include: { warehouse: true, courier: true, shipments: { where: { status: { not: 'CANCELLED' } } } },
     });
     for (const p of toConfirm) {
-      if (p.shipments.length === 0) continue;
+      if (p.shipments.length === 0) {
+        // Every parcel was cancelled: call off the pickup so no executive is sent.
+        await this.prisma.pickup.update({ where: { id: p.id }, data: { status: 'CANCELLED' } });
+        continue;
+      }
       const pct = this.couriers.pickupOnTimePct(p.courierCode);
       if (roll(`${p.id}:confirm`) < pct) {
         await this.prisma.pickup.update({
           where: { id: p.id },
           data: { status: 'CONFIRMED', confirmedAt: now, executiveName: EXECUTIVES[roll(p.id) % EXECUTIVES.length] },
         });
-        await this.prisma.shipment.updateMany({ where: { pickupId: p.id }, data: { status: 'PICKUP_SCHEDULED' } });
+        await this.prisma.shipment.updateMany({ where: { pickupId: p.id, status: { not: 'CANCELLED' } }, data: { status: 'PICKUP_SCHEDULED' } });
         confirmed++;
       } else {
         const to = await this.moveParcels(p.id, { slotStart: p.slotStart, slotEnd: p.slotEnd }, true, now);
@@ -71,7 +75,7 @@ export class PickupsService {
     // 2. Pickup during the slot: collected one hour in, or missed when the slot ends.
     const due = await this.prisma.pickup.findMany({
       where: { brandId, status: 'CONFIRMED', slotStart: { lte: new Date(now.getTime() - HOUR) } },
-      include: { warehouse: true, courier: true, shipments: true },
+      include: { warehouse: true, courier: true, shipments: { where: { status: { not: 'CANCELLED' } } } },
     });
     for (const p of due) {
       const pct = this.couriers.pickupOnTimePct(p.courierCode);
@@ -79,7 +83,7 @@ export class PickupsService {
         const at = new Date(p.slotStart.getTime() + (30 + (roll(`${p.id}:minute`) % 75)) * 60 * 1000);
         await this.prisma.$transaction([
           this.prisma.pickup.update({ where: { id: p.id }, data: { status: 'PICKED_UP', pickedUpAt: at } }),
-          this.prisma.shipment.updateMany({ where: { pickupId: p.id }, data: { status: 'PICKED_UP', lastScanAt: at } }),
+          this.prisma.shipment.updateMany({ where: { pickupId: p.id, status: { not: 'CANCELLED' } }, data: { status: 'PICKED_UP', lastScanAt: at } }),
           this.prisma.trackingEvent.createMany({
             data: p.shipments.map((s) => ({
               shipmentId: s.id,
@@ -96,6 +100,7 @@ export class PickupsService {
             data: { resolvedAt: at },
           }),
         ]);
+        await this.checkWeights(brandId, p, now);
         collected++;
       } else if (now.getTime() >= p.slotEnd.getTime()) {
         const secondMiss = p.missCount >= 1;
@@ -133,7 +138,7 @@ export class PickupsService {
   ): Promise<{ id: string; courierName: string } | null> {
     const from = await this.prisma.pickup.findUniqueOrThrow({
       where: { id: pickupId },
-      include: { warehouse: true, courier: true, shipments: { include: { order: true } } },
+      include: { warehouse: true, courier: true, shipments: { where: { status: { not: 'CANCELLED' } }, include: { order: true } } },
     });
     let target: { id: string; courierName: string } | null = null;
 
@@ -160,6 +165,22 @@ export class PickupsService {
         const booked = await this.couriers
           .get(best.courierCode)
           .book({ ...req, orderNumber: s.order.orderNumber, idempotencyKey: `${s.idempotencyKey}:${best.courierCode}` }, now);
+        // Cancel the old booking so the first courier neither comes nor bills us.
+        const cancelled = await this.couriers
+          .get(from.courierCode)
+          .cancel(s.awb)
+          .catch(() => ({ cancelled: false }));
+        await this.prisma.auditLog.create({
+          data: {
+            brandId: from.brandId,
+            action: 'COURIER_BOOKING_CANCELLED',
+            entityType: 'Shipment',
+            entityId: s.id,
+            before: { courier: from.courierCode, awb: s.awb },
+            after: { courier: best.courierCode, awb: booked.awb, oldBookingCancelled: cancelled.cancelled },
+            createdAt: now,
+          },
+        });
         courierCode = best.courierCode;
         awb = booked.awb;
         charged = booked.chargedAmount;
@@ -204,6 +225,40 @@ export class PickupsService {
       });
     }
     return target;
+  }
+
+  /**
+   * The courier weighs every parcel at pickup. When its weight is in a higher
+   * slab than what we were charged, a weight dispute opens for Finance with
+   * the packing details as proof. Demo couriers do this for about 1 in 12 parcels.
+   */
+  private async checkWeights(
+    brandId: string,
+    p: { id: string; courier: { name: string }; shipments: { id: string; chargedWeightG: number; awb: string }[] },
+    now: Date,
+  ) {
+    for (const s of p.shipments) {
+      if (roll(`${s.id}:weight`) >= 8) continue;
+      const courierWeightG = s.chargedWeightG + 500;
+      await this.prisma.shipment.update({ where: { id: s.id }, data: { courierWeightG } });
+      const exists = await this.prisma.redFlag.findFirst({ where: { type: 'WEIGHT_DISPUTE', shipmentId: s.id } });
+      if (exists) continue;
+      const owner = await this.brands.ownerFor('FINANCE');
+      await this.prisma.redFlag.create({
+        data: {
+          brandId,
+          shipmentId: s.id,
+          type: 'WEIGHT_DISPUTE',
+          severity: 'WARNING',
+          title: 'Weight dispute',
+          message: `${p.courier.name} weighed ${courierWeightG / 1000} kg, we declared ${s.chargedWeightG / 1000} kg · AWB ${s.awb}`,
+          action: 'Raise dispute with proof',
+          dueAt: new Date(now.getTime() + 7 * 24 * HOUR),
+          ownerId: owner?.id,
+          createdAt: now,
+        },
+      });
+    }
   }
 
   private async raise(

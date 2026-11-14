@@ -1,7 +1,7 @@
-import { istAt, istHour, nextBookableSlot, slotAfter, slotLabel } from './ist.js';
+import { closedReason, istAt, istHour, nextBookableSlot, nextWorkingDayOffset, slotAfter, slotLabel } from './ist.js';
 
 describe('India time slots', () => {
-  const now = new Date('2026-11-14T08:00:00Z'); // 1:30 pm IST
+  const now = new Date('2026-11-14T08:00:00Z'); // Saturday, 1:30 pm IST
 
   it('reads the hour in IST', () => expect(istHour(now)).toBe(13.5));
   it('builds a slot start in IST', () => expect(istAt(now, 16).toISOString()).toBe('2026-11-14T10:30:00.000Z'));
@@ -9,10 +9,21 @@ describe('India time slots', () => {
     // 2 pm is only 30 minutes away, so 4 pm is the first slot a courier can confirm.
     expect(slotLabel(nextBookableSlot(now).slotStart)).toBe('4 pm–6 pm');
   });
-  it('after the last slot of the day, the next slot is tomorrow morning', () => {
+  it('after the last Saturday slot, the next slot is Monday morning (no Sunday pickups)', () => {
     const last = istAt(now, 16);
     const next = slotAfter(last).slotStart;
     expect(slotLabel(next)).toBe('10 am–12 pm');
-    expect(next.getTime() - last.getTime()).toBe(18 * 60 * 60 * 1000);
+    expect(next.getTime() - last.getTime()).toBe(42 * 60 * 60 * 1000);
+  });
+  it('knows Sundays and holidays', () => {
+    expect(closedReason(istAt(now, 12, 1))).toBe('Sunday');
+    expect(closedReason(new Date('2026-08-15T06:00:00Z'))).toBe('Holiday');
+    expect(closedReason(now)).toBeNull();
+    expect(nextWorkingDayOffset(now)).toBe(2);
+  });
+  it('late on Saturday, the first bookable slot is Monday 10 am', () => {
+    const late = new Date('2026-11-14T13:00:00Z'); // 6:30 pm IST Saturday
+    const slot = nextBookableSlot(late).slotStart;
+    expect(slot.toISOString()).toBe(istAt(late, 10, 2).toISOString());
   });
 });

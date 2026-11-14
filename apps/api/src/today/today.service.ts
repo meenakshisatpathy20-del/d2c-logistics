@@ -30,10 +30,10 @@ export class TodayService {
       this.prisma.redFlag.findMany({
         where: { brandId, resolvedAt: null },
         include: { owner: true, shipment: { include: { order: true } } },
-        orderBy: [{ severity: 'desc' }, { createdAt: 'asc' }],
+        orderBy: [{ actedAt: { sort: 'asc', nulls: 'first' } }, { severity: 'desc' }, { createdAt: 'asc' }],
       }),
       this.prisma.pickup.findMany({
-        where: { brandId, slotStart: { gte: dayStart, lt: dayEnd } },
+        where: { brandId, slotStart: { gte: dayStart, lt: dayEnd }, status: { not: 'CANCELLED' } },
         include: { warehouse: true, courier: true },
         orderBy: { slotStart: 'asc' },
       }),
@@ -56,10 +56,15 @@ export class TodayService {
 
     const needsYou = flags.map((f) => ({
       id: f.id,
+      orderId: f.shipment?.order.id ?? null,
+      type: f.type,
+      acted: !!f.actedAt,
+      note: f.note,
       severity: f.severity === 'CRITICAL' ? 'critical' : 'warning',
       title: f.title,
       detail: f.shipment ? `#${f.shipment.order.orderNumber} · ${f.shipment.order.productBrand ?? ''} · ${f.message}`.replace(' ·  · ', ' · ') : f.message,
       owner: f.owner?.name ?? 'Unassigned',
+      ownerId: f.ownerId,
       due: dueLabel(f.dueAt, now),
       overdue: !!f.dueAt && f.dueAt < now,
       action: f.action ?? 'Open',
