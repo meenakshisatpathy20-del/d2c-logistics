@@ -20,11 +20,12 @@ const sign = (payload: string) => createHmac('sha256', secret()).update(payload)
 
 /** A signed, expiring session token: <payload>.<signature>. */
 export function createSessionToken(userId: string, now = new Date()): string {
-  const payload = Buffer.from(JSON.stringify({ uid: userId, exp: now.getTime() + SESSION_HOURS * 3600_000 })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ uid: userId, iat: now.getTime(), exp: now.getTime() + SESSION_HOURS * 3600_000 })).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 
-export function readSessionToken(token: string | undefined, now = new Date()): string | null {
+/** The signed-in user and when the session started, or null if it is not valid. */
+export function readSession(token: string | undefined, now = new Date()): { uid: string; iat: number } | null {
   if (!token) return null;
   const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
@@ -32,8 +33,8 @@ export function readSessionToken(token: string | undefined, now = new Date()): s
   const given = Buffer.from(sig);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
   try {
-    const { uid, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { uid: string; exp: number };
-    return exp > now.getTime() && typeof uid === 'string' ? uid : null;
+    const { uid, iat, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { uid: string; iat?: number; exp: number };
+    return exp > now.getTime() && typeof uid === 'string' ? { uid, iat: iat ?? exp - SESSION_HOURS * 3600_000 } : null;
   } catch {
     return null;
   }
@@ -51,4 +52,8 @@ export function sessionCookie(token: string | null): string {
   const secure = process.env.COOKIE_SECURE === 'true' ? '; Secure' : '';
   const age = token ? SESSION_HOURS * 3600 : 0;
   return `${SESSION_COOKIE}=${token ?? ''}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${secure}`;
+}
+
+export function readSessionToken(token: string | undefined, now = new Date()): string | null {
+  return readSession(token, now)?.uid ?? null;
 }

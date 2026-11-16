@@ -117,7 +117,7 @@ export function RateCalculator() {
                         </Badge>
                       ) : null}
                     </td>
-                    <td className="py-3 pr-3 text-ink-2">{q.serviceable ? q.zone.toLowerCase() : "Not serviceable"}</td>
+                    <td className="py-3 pr-3 text-ink-2">{q.switchedOff ? "Switched off by our team" : q.serviceable ? q.zone.toLowerCase() : "Not serviceable"}</td>
                     <td className="py-3 pr-3 text-ink-2">{q.etaDays} days</td>
                     <td className={clsx("py-3 pr-3", q.pickupOnTimePct < 85 ? "font-medium text-flag-red" : "text-ink-2")}>{q.pickupOnTimePct}%</td>
                     <td className="py-3 pr-3 text-ink-2">{q.chargedWeightGrams / 1000} kg</td>

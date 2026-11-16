@@ -33,7 +33,7 @@ export class TodayService {
         orderBy: [{ actedAt: { sort: 'asc', nulls: 'first' } }, { severity: 'desc' }, { createdAt: 'asc' }],
       }),
       this.prisma.pickup.findMany({
-        where: { brandId, slotStart: { gte: dayStart, lt: dayEnd }, status: { not: 'CANCELLED' } },
+        where: { brandId, slotStart: { gte: dayStart, lt: dayEnd }, status: { not: 'CANCELLED' }, parcelCount: { gt: 0 } },
         include: { warehouse: true, courier: true },
         orderBy: { slotStart: 'asc' },
       }),
@@ -84,7 +84,9 @@ export class TodayService {
               ? { status: 'missed', label: 'Missed · moved' }
               : p.status === 'REASSIGNED'
                 ? { status: 'missed', label: 'Not confirmed · moved' }
-                : confirmWindow
+                : p.status === 'POSTPONED'
+                  ? { status: 'waiting', label: 'Postponed · moved' }
+                  : confirmWindow
                   ? { status: 'waiting', label: 'Awaiting confirmation' }
                   : { status: 'scheduled', label: 'Scheduled' };
       row.slots.push({
@@ -99,7 +101,8 @@ export class TodayService {
       });
       rows.set(p.warehouseId, row);
     }
-    const counted = pickups.filter((p) => p.status !== 'REASSIGNED' && p.status !== 'MISSED');
+    // A missed, moved or postponed pickup is counted where its parcels went, not twice.
+    const counted = pickups.filter((p) => !['REASSIGNED', 'MISSED', 'POSTPONED'].includes(p.status));
 
     return {
       now: now.toISOString(),

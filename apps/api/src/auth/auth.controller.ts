@@ -68,9 +68,11 @@ export class AuthController {
   @Roles('ADMIN', 'OPS', 'WAREHOUSE', 'SUPPORT', 'FINANCE')
   @Post('password')
   @HttpCode(200)
-  changePassword(@Body() body: unknown, @Req() req: Req) {
+  async changePassword(@Body() body: unknown, @Req() req: Req, @Res({ passthrough: true }) res: Res) {
     const { current, next } = parse(ChangeSchema, body);
-    return this.auth.changePassword(req.user!.id, current, next);
+    const { token } = await this.auth.changePassword(req.user!.id, current, next);
+    res.setHeader('Set-Cookie', sessionCookie(token));
+    return { ok: true };
   }
 
   @Roles('ADMIN')

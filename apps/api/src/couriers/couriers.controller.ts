@@ -1,10 +1,31 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import type { SessionUser } from '../auth/auth.guard.js';
+import { Roles } from '../auth/roles.decorator.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { BookingRequestSchema, RateRequestSchema } from './courier.types.js';
 import { CouriersService } from './couriers.service.js';
 
 @Controller('couriers')
 export class CouriersController {
-  constructor(private readonly couriers: CouriersService) {}
+  constructor(
+    private readonly couriers: CouriersService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /** Switch a courier off (account on hold, too many misses) or back on. */
+  @Roles('ADMIN', 'OPS')
+  @Patch(':code')
+  async setActive(@Param('code') code: string, @Body() body: { active?: unknown; reason?: unknown }, @Req() req: { user?: SessionUser }) {
+    if (typeof body?.active !== 'boolean') throw new BadRequestException('active must be true or false');
+    const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 200) : '';
+    if (!body.active && reason.length < 3) throw new BadRequestException('Give a reason for switching the courier off');
+    await this.couriers.setActive(code.toUpperCase(), body.active);
+    const user = req.user!;
+    await this.prisma.auditLog.create({
+      data: { brandId: user.brandId, actorId: user.id, action: body.active ? 'COURIER_ON' : 'COURIER_OFF', entityType: 'Courier', entityId: code.toUpperCase(), after: { reason } },
+    });
+    return this.couriers.list().find((c) => c.code === code.toUpperCase());
+  }
 
   @Get()
   list() {

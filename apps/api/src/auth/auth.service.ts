@@ -9,6 +9,12 @@ const OTP_MINUTES = 5;
 const OTP_MAX_TRIES = 5;
 const hashCode = (challengeId: string, code: string) => createHash('sha256').update(`${challengeId}:${code}`).digest('hex');
 
+/** Seeded demo vendors use 98000000xx; DEMO_VENDOR_PHONES can list more for a demo. */
+export function isDemoVendorPhone(phone: string): boolean {
+  const extra = (process.env.DEMO_VENDOR_PHONES ?? '').split(',').map((p) => p.trim()).filter(Boolean);
+  return /^98000000\d\d$/.test(phone) || extra.includes(phone);
+}
+
 export function maskEmail(email: string): string {
   const [name, domain] = email.split('@');
   return `${name.slice(0, 2)}${'•'.repeat(Math.max(1, name.length - 2))}@${domain}`;
@@ -48,6 +54,11 @@ export class AuthService {
     }
     const user = await this.prisma.user.findFirst({ where: { phone, role: 'VENDOR', active: true } });
     if (!user) throw new UnauthorizedException('This number is not registered as a vendor. Ask D2C operations to add it.');
+    // A vendor has no password, so the code is the only lock. Until SMS is connected the
+    // code shows on screen, which is safe only for demo numbers, never for a real vendor's.
+    if ((process.env.OTP_DELIVERY ?? 'demo') === 'demo' && !isDemoVendorPhone(phone)) {
+      throw new HttpException('Vendor sign-in by SMS starts once SMS is connected. Until then, only demo vendor numbers can sign in.', HttpStatus.SERVICE_UNAVAILABLE);
+    }
     return this.challenge(user.id, `+91 ${phone.slice(0, 2)}••••••${phone.slice(-2)}`, now);
   }
 
@@ -67,7 +78,8 @@ export class AuthService {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     if (!(await verifyPassword(current, user.passwordHash))) throw new UnauthorizedException('Current password is wrong');
     await this.setPassword(user.brandId, userId, userId, next, now);
-    return { ok: true };
+    // Signed out everywhere else; this browser gets a fresh session.
+    return { ok: true, token: createSessionToken(userId, new Date(now.getTime() + 1)) };
   }
 
   /** An admin sets a new password for a team member (e.g. a forgotten one). */
@@ -80,7 +92,7 @@ export class AuthService {
   }
 
   private async setPassword(brandId: string, actorId: string, userId: string, next: string, now: Date) {
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(next) } });
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(next), passwordChangedAt: now } });
     await this.prisma.auditLog.create({ data: { brandId, actorId, action: 'PASSWORD_CHANGED', entityType: 'User', entityId: userId, createdAt: now } });
   }
 

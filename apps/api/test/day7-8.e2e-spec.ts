@@ -118,14 +118,14 @@ describe('Day 7-8: roles, alerts, escalation, summary, vendor view (e2e)', () =>
     await alerts.run(new Date(due.getTime() + 10 * 60_000));
     let f = await prisma.redFlag.findUniqueOrThrow({ where: { id: flag.id } });
     expect(f.escalationLevel).toBe(1);
-    const toManager = await prisma.notification.findFirst({ where: { dedupeKey: `esc:${flag.id}:1:app` } });
+    const toManager = await prisma.notification.findFirst({ where: { dedupeKey: { startsWith: `esc:${flag.id}:1:` }, channel: 'APP' } });
     expect(toManager?.userId).toBe(ops.managerId);
 
     await alerts.run(new Date(due.getTime() + 5 * HOUR));
     f = await prisma.redFlag.findUniqueOrThrow({ where: { id: flag.id } });
     expect(f.escalationLevel).toBe(3);
-    expect(await prisma.notification.count({ where: { dedupeKey: `esc:${flag.id}:2` } })).toBe(1); // courier email
-    expect(await prisma.notification.count({ where: { dedupeKey: `esc:${flag.id}:3:app` } })).toBe(1);
+    expect(await prisma.notification.count({ where: { dedupeKey: { startsWith: `esc:${flag.id}:2:` } } })).toBe(1); // courier email
+    expect(await prisma.notification.count({ where: { dedupeKey: { startsWith: `esc:${flag.id}:3:` }, channel: 'APP' } })).toBe(1);
     await alerts.run(new Date(due.getTime() + 9 * HOUR));
     expect(await prisma.notification.count({ where: { dedupeKey: { startsWith: `esc:${flag.id}:` } } })).toBe(5);
 
@@ -134,8 +134,14 @@ describe('Day 7-8: roles, alerts, escalation, summary, vendor view (e2e)', () =>
       data: { brandId: brand.id, shipmentId: b.body.id, type: 'RTO', severity: 'CRITICAL', title: 'Returning', message: 'test', action: 'Call customer', ownerId: ops.id, dueAt: due },
     });
     await founder.post(`/api/flags/${flag2.id}/act`).send({ kind: 'act' }).expect(201);
-    await alerts.run(new Date(due.getTime() + 5 * HOUR));
+    await alerts.run(new Date(Date.now() + HOUR));
     expect((await prisma.redFlag.findUniqueOrThrow({ where: { id: flag2.id } })).escalationLevel).toBe(0);
+    // ...but an action is not a fix: no result 4 h later (RTO follow-up) and the ladder starts again.
+    await alerts.run(new Date(Date.now() + 5 * HOUR));
+    const again = await prisma.redFlag.findUniqueOrThrow({ where: { id: flag2.id } });
+    expect(again.escalationLevel).toBeGreaterThanOrEqual(1);
+    const msg = await prisma.notification.findFirst({ where: { dedupeKey: { startsWith: `esc:${flag2.id}:1:` }, channel: 'APP' } });
+    expect(msg?.body).toMatch(/no result after/);
   });
 
   it('builds and sends the daily summary to admins, and shows it', async () => {

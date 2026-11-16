@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { CouriersModule } from './couriers/couriers.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { SettingsModule } from './settings/settings.module.js';
 import { ShipmentsModule } from './shipments/shipments.module.js';
 
 @Module({
@@ -18,6 +19,7 @@ import { ShipmentsModule } from './shipments/shipments.module.js';
     CouriersModule,
     ShipmentsModule,
     JobsModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

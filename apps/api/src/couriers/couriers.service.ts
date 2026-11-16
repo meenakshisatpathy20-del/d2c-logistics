@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, type OnModuleInit, Optional } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service.js';
 import type { CourierAdapter, RateQuote, RateRequest } from './courier.types.js';
 import { DemoCourierAdapter } from './demo/demo-courier.adapter.js';
 import { DEMO_COURIERS } from './demo/profiles.js';
@@ -11,16 +12,39 @@ import { DEMO_COURIERS } from './demo/profiles.js';
 export const RELIABLE_PICKUP_PCT = 85;
 
 @Injectable()
-export class CouriersService {
+export class CouriersService implements OnModuleInit {
   private readonly adapters = new Map<string, CourierAdapter>(
     DEMO_COURIERS.map((p) => [p.code, new DemoCourierAdapter(p)]),
   );
+  /** Couriers switched off by our team (account on hold, too many misses): never offered or used. */
+  private readonly off = new Set<string>();
+
+  constructor(@Optional() private readonly prisma?: PrismaService) {}
+
+  async onModuleInit() {
+    if (!this.prisma) return;
+    const rows = await this.prisma.courier.findMany({ where: { active: false }, select: { code: true } });
+    for (const r of rows) this.off.add(r.code);
+  }
+
+  isActive(code: string) {
+    return !this.off.has(code);
+  }
+
+  /** Switch a courier off or on; takes effect for every new booking and every pickup move at once. */
+  async setActive(code: string, active: boolean) {
+    this.get(code);
+    if (this.prisma) await this.prisma.courier.update({ where: { code }, data: { active } });
+    if (active) this.off.delete(code);
+    else this.off.add(code);
+  }
 
   list() {
     return [...this.adapters.values()].map((a) => ({
       code: a.code,
       name: a.name,
       mode: a.mode,
+      active: this.isActive(a.code),
       pickupOnTimePct: this.pickupOnTimePct(a.code),
     }));
   }
@@ -51,7 +75,10 @@ export class CouriersService {
    */
   compareRates(req: RateRequest): RateQuote[] {
     const quotes = [...this.adapters.values()]
-      .map((a) => a.quote(req))
+      .map((a) => {
+        const q = a.quote(req);
+        return this.isActive(a.code) ? q : { ...q, serviceable: false, switchedOff: true };
+      })
       .sort(
         (a, b) =>
           Number(b.serviceable) - Number(a.serviceable) || a.total - b.total || a.etaDays - b.etaDays,

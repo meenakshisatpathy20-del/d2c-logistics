@@ -66,6 +66,7 @@ export class ShipmentsService {
       ? quotes.find((q) => q.courierCode === input.courierCode)
       : quotes.find((q) => q.recommended);
     if (!quote) throw new BadRequestException(`Unknown courier ${input.courierCode}`);
+    if (quote.switchedOff) throw new BadRequestException(`${quote.courierName} is switched off by our team right now. Pick another courier.`);
     if (!quote.serviceable) throw new BadRequestException(`${quote.courierName} does not deliver to pin code ${input.pincode}`);
 
     let { slotStart, slotEnd } = input.slot ? slotWindow(now, input.slot.day, input.slot.startHour) : nextBookableSlot(now);

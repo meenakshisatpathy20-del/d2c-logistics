@@ -11,6 +11,20 @@ export const FlagActionSchema = z.object({
 export type FlagAction = z.infer<typeof FlagActionSchema>;
 
 /**
+ * After someone acts, the other side gets this long to show a result
+ * (the parcel moves, the pickup happens). Still open after it, the
+ * escalation ladder starts again: an action is not a resolution.
+ */
+export const FOLLOW_UP_HOURS: Record<string, number> = {
+  NO_SCAN_48H: 4, // courier answers the RCA
+  RTO: 4,
+  PICKUP_MISSED: 2,
+  PICKUP_UNCONFIRMED: 2,
+  NDR: 24,
+  WEIGHT_DISPUTE: 72,
+};
+
+/**
  * The buttons on "Needs you":
  *  act      - do the suggested fix (reattempt, RCA to courier, call customer...).
  *             The flag stays open, marked "action taken", until the parcel moves.
@@ -52,7 +66,8 @@ export class FlagsService {
     // act: record the suggested fix and tell the courier through the shipment's timeline.
     const what = f.action ?? 'Action taken';
     const note = `${what}${input.note ? `: ${input.note}` : ''} · ${actor.name}`;
-    await this.prisma.redFlag.update({ where: { id }, data: { actedAt: now, note } });
+    const followUp = new Date(now.getTime() + (FOLLOW_UP_HOURS[f.type] ?? 24) * 3600_000);
+    await this.prisma.redFlag.update({ where: { id }, data: { actedAt: now, note, dueAt: followUp, escalationLevel: 0, escalatedAt: null } });
     if (f.shipmentId && f.shipment) {
       await this.prisma.trackingEvent.create({
         data: {
@@ -73,8 +88,8 @@ export class FlagsService {
     const brandId = await this.brands.currentBrandId();
     return this.prisma.user.findMany({
       // Our own team only: vendor and courier partner logins are not owners of problems.
-      where: { brandId, active: true, role: { notIn: ['VENDOR', 'COURIER'] } },
-      select: { id: true, name: true, role: true, email: true, lastLoginAt: true },
+      where: { brandId, role: { notIn: ['VENDOR', 'COURIER'] } },
+      select: { id: true, name: true, role: true, email: true, phone: true, active: true, managerId: true, lastLoginAt: true },
       orderBy: { createdAt: 'asc' },
     });
   }

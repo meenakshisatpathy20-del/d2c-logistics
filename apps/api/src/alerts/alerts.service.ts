@@ -144,7 +144,8 @@ export class AlertsService {
   private async escalate(now: Date) {
     const brandId = await this.brands.currentBrandId();
     const overdue = await this.prisma.redFlag.findMany({
-      where: { brandId, resolvedAt: null, actedAt: null, dueAt: { lt: now }, escalationLevel: { lt: 3 } },
+      // Acted-on problems are included: past their follow-up time with no result, they climb again.
+      where: { brandId, resolvedAt: null, dueAt: { lt: now }, escalationLevel: { lt: 3 } },
       include: {
         owner: { include: { manager: true } },
         shipment: { include: { order: true, courier: true } },
@@ -159,14 +160,16 @@ export class AlertsService {
       for (let level = f.escalationLevel + 1; level <= target; level++) {
         const courier = f.shipment?.courier ?? f.pickup?.courier ?? null;
         const what = `${f.title}${f.shipment ? ` · #${f.shipment.order.orderNumber}` : f.pickup ? ` · ${f.pickup.warehouse.name}` : ''}`;
-        const lateText = `overdue by ${Math.max(1, Math.round(late / HOUR))} h, owner ${f.owner?.name ?? 'unassigned'}`;
+        const lateText = `${f.actedAt ? `no result after "${f.note ?? 'action'}", ` : ''}overdue by ${Math.max(1, Math.round(late / HOUR))} h, owner ${f.owner?.name ?? 'unassigned'}`;
+        // A new deadline (after an action) starts a new round of escalation messages.
+        const round = f.dueAt!.getTime();
         const link = this.flagLink(f);
         let to = '';
         if (level === 1) {
           const manager = f.owner?.manager ?? founder;
           if (manager) {
             to = manager.name;
-            await this.toPerson(brandId, manager, { kind: 'ESCALATION', title: `⬆ Escalated to you: ${what}`, body: `${f.message} · ${lateText}`, link, key: `esc:${f.id}:1`, now });
+            await this.toPerson(brandId, manager, { kind: 'ESCALATION', title: `⬆ Escalated to you: ${what}`, body: `${f.message} · ${lateText}`, link, key: `esc:${f.id}:1:${round}`, now });
           }
         } else if (level === 2) {
           if (courier) {
@@ -179,13 +182,13 @@ export class AlertsService {
               title: `Escalation: ${what}`,
               body: `Dear ${courier.name} team,\n${f.message}${f.shipment ? `\nAWB ${f.shipment.awb}` : ''}\nThis is ${lateText}. Please resolve and reply with the reason (RCA).\nD2C Ecommerce India`,
               link,
-              dedupeKey: `esc:${f.id}:2`,
+              dedupeKey: `esc:${f.id}:2:${round}`,
               now,
             });
           } else to = 'no courier involved, skipped';
         } else if (founder) {
           to = founder.name;
-          await this.toPerson(brandId, founder, { kind: 'ESCALATION', title: `⬆⬆ Founder escalation: ${what}`, body: `${f.message} · ${lateText}`, link, key: `esc:${f.id}:3`, now });
+          await this.toPerson(brandId, founder, { kind: 'ESCALATION', title: `⬆⬆ Founder escalation: ${what}`, body: `${f.message} · ${lateText}`, link, key: `esc:${f.id}:3:${round}`, now });
         }
         await this.prisma.redFlag.update({ where: { id: f.id }, data: { escalationLevel: level, escalatedAt: now } });
         await this.prisma.auditLog.create({
@@ -222,7 +225,8 @@ export class AlertsService {
       this.prisma.pickup.findMany({ where: { brandId, slotStart: during, status: { not: 'CANCELLED' }, parcelCount: { gt: 0 } }, select: { status: true } }),
       this.prisma.shipment.aggregate({ where: { brandId, createdAt: during, status: { not: 'CANCELLED' } }, _sum: { chargedAmount: true } }),
     ]);
-    const counted = pickups.filter((p) => p.status !== 'REASSIGNED');
+    // Moved or postponed pickups are counted where their parcels went.
+    const counted = pickups.filter((p) => !['REASSIGNED', 'POSTPONED'].includes(p.status));
     return {
       day: istDateKey(now),
       booked,

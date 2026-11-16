@@ -38,6 +38,8 @@ export interface RateQuote {
   pickupOnTimePct: number;
   /** Set by the comparison: the cheapest reliable courier for this parcel. */
   recommended: boolean;
+  /** Our team switched this courier off (account on hold, too many misses). */
+  switchedOff?: boolean;
 }
 
 export interface BookingRequest extends RateRequest {

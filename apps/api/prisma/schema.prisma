@@ -57,6 +57,7 @@ model User {
   active       Boolean   @default(true)
   passwordHash String? // scrypt; mobile + password until SMS OTP is connected
   lastLoginAt  DateTime?
+  passwordChangedAt DateTime? // sign-ins from before this are no longer valid
   createdAt    DateTime  @default(now())
 
   ownedTasks Task[]    @relation("TaskOwner")

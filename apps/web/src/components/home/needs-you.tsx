@@ -65,10 +65,10 @@ export function NeedsYouCard({ item, onChanged }: { item: Item; onChanged: () =>
             ) : null}
           </div>
           <div className="mt-0.5 text-[13px] text-muted">{item.detail}</div>
-          {item.escalationLevel && !item.acted ? (
+          {item.escalationLevel ? (
             <div className="mt-1.5 text-[12px] font-semibold text-flag-red">⬆ {["", "Escalated to the manager", "Escalated to the courier's account manager", "Escalated to the founder"][item.escalationLevel]}</div>
           ) : null}
-          {item.acted && item.note ? <div className="mt-1.5 text-[12.5px] font-medium text-[#0e6e05]">✓ {item.note} · waiting for the parcel to move</div> : null}
+          {item.acted && item.note ? <div className="mt-1.5 text-[12.5px] font-medium text-[#0e6e05]">✓ {item.note} · follow-up {item.due.toLowerCase()}</div> : null}
         </div>
       </div>
 
@@ -108,7 +108,7 @@ export function NeedsYouCard({ item, onChanged }: { item: Item; onChanged: () =>
           {!team ? (
             <Loader2 size={14} className="animate-spin text-muted" />
           ) : (
-            team.map((m) => (
+            team.filter((m) => m.active).map((m) => (
               <button
                 key={m.id}
                 disabled={!!busy || m.id === item.ownerId}

@@ -14,6 +14,7 @@ export type RateQuote = {
   etaDays: number;
   pickupOnTimePct: number;
   recommended: boolean;
+  switchedOff?: boolean;
 };
 
 export type RateRequest = {
@@ -335,10 +336,38 @@ export type FlagAction = { kind: "act" | "resolve" | "reassign"; note?: string; 
 export const actOnFlag = (id: string, action: FlagAction) =>
   request<{ ok: boolean; message: string }>(`/api/flags/${id}/act`, { method: "POST", body: JSON.stringify(action) });
 
-export type TeamMember = { id: string; name: string; role: string; email: string | null; lastLoginAt: string | null };
+export type TeamMember = { id: string; name: string; role: string; email: string | null; phone: string; active: boolean; managerId: string | null; lastLoginAt: string | null };
 export const getTeam = () => request<TeamMember[]>("/api/team");
 
-export type CourierInfo = { code: string; name: string; mode: "DEMO" | "LIVE"; pickupOnTimePct?: number };
+export type CourierInfo = { code: string; name: string; mode: "DEMO" | "LIVE"; active: boolean; pickupOnTimePct?: number };
+export const setCourierActive = (code: string, active: boolean, reason?: string) =>
+  request<CourierInfo>(`/api/couriers/${code}`, { method: "PATCH", body: JSON.stringify({ active, reason }) });
+
+// ---------- Settings: team, warehouses ----------
+
+export const addTeamMember = (m: { name: string; email: string; phone: string; role: string; managerId?: string; password: string }) =>
+  request<{ id: string }>("/api/settings/team", { method: "POST", body: JSON.stringify(m) });
+export const updateTeamMember = (id: string, patch: { active?: boolean; role?: string; managerId?: string | null }) =>
+  request<{ id: string }>(`/api/settings/team/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+
+export type WarehouseFull = {
+  code: string;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  pincode: string;
+  cluster: string | null;
+  contactName: string;
+  contactPhone: string;
+  placeholder: boolean;
+  vendorLogin: { active: boolean; lastLoginAt: string | null } | null;
+};
+export const getWarehousesFull = () => request<WarehouseFull[]>("/api/settings/warehouses");
+export const addWarehouse = (w: Omit<WarehouseFull, "placeholder" | "vendorLogin" | "cluster"> & { cluster?: string }) =>
+  request<WarehouseFull>("/api/settings/warehouses", { method: "POST", body: JSON.stringify(w) });
+export const updateWarehouse = (code: string, patch: Partial<Omit<WarehouseFull, "code" | "placeholder" | "vendorLogin">>) =>
+  request<WarehouseFull>(`/api/settings/warehouses/${code}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const getCouriers = () => request<CourierInfo[]>("/api/couriers");
 
 // ---------- Payments ----------
