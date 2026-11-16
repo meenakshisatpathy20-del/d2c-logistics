@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import { BrandService } from '../common/brand.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -24,16 +24,20 @@ export class FlagsService {
     private readonly brands: BrandService,
   ) {}
 
-  async act(id: string, input: FlagAction, actor: { id: string; name: string }, now = new Date()) {
+  async act(id: string, input: FlagAction, actor: { id: string; name: string; role?: string }, now = new Date()) {
     const brandId = await this.brands.currentBrandId();
     const f = await this.prisma.redFlag.findFirst({ where: { id, brandId }, include: { shipment: { include: { courier: true } } } });
     if (!f) throw new NotFoundException('Problem not found');
     if (f.resolvedAt) throw new BadRequestException('This problem is already closed');
+    if (f.type === 'WEIGHT_DISPUTE' && actor.role && !['ADMIN', 'FINANCE', 'OPS'].includes(actor.role)) {
+      throw new ForbiddenException('Weight disputes are handled by Finance or Operations');
+    }
 
     if (input.kind === 'reassign') {
       const owner = await this.prisma.user.findFirst({ where: { id: input.ownerId, brandId, active: true } });
       if (!owner) throw new BadRequestException('Pick a team member');
-      await this.prisma.redFlag.update({ where: { id }, data: { ownerId: owner.id } });
+      // A new owner gets a fresh deadline clock: the escalation ladder starts again.
+      await this.prisma.redFlag.update({ where: { id }, data: { ownerId: owner.id, escalationLevel: 0, escalatedAt: null } });
       await this.audit(brandId, actor.id, 'FLAG_REASSIGNED', id, { to: owner.name }, now);
       return { ok: true, message: `Assigned to ${owner.name}` };
     }
@@ -68,7 +72,8 @@ export class FlagsService {
   async team() {
     const brandId = await this.brands.currentBrandId();
     return this.prisma.user.findMany({
-      where: { brandId, active: true },
+      // Our own team only: vendor and courier partner logins are not owners of problems.
+      where: { brandId, active: true, role: { notIn: ['VENDOR', 'COURIER'] } },
       select: { id: true, name: true, role: true, email: true, lastLoginAt: true },
       orderBy: { createdAt: 'asc' },
     });

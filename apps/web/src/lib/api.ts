@@ -48,7 +48,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/auth/")) {
     // Session ended: back to sign-in, then return here.
-    window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    const path = window.location.pathname;
+    window.location.replace(path === "/v" || path.startsWith("/v/") ? "/v/login" : `/login?next=${encodeURIComponent(path + window.location.search)}`);
     throw new Error("Please sign in");
   }
   if (!res.ok) {
@@ -170,6 +171,7 @@ export type TodayData = {
     acted: boolean;
     note: string | null;
     ownerId: string | null;
+    escalationLevel: number;
     severity: "critical" | "warning";
     title: string;
     detail: string;
@@ -215,7 +217,7 @@ export const login = (email: string, password: string) =>
 export const verifyCode = (challengeId: string, code: string) =>
   request<{ name: string; role: string }>("/api/auth/verify", { method: "POST", body: JSON.stringify({ challengeId, code }) });
 export const logout = () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
-export type Me = { id: string; name: string; email: string | null; role: string };
+export type Me = { id: string; name: string; email: string | null; role: string; warehouseId: string | null };
 export const getMe = () => request<Me>("/api/auth/me");
 
 // ---------- Orders ----------
@@ -310,8 +312,10 @@ export type OrderDetail = {
     expectedDelivery: string | null;
     pickup: { id: string; slot: string; date: string; status: string; executive: string | null; manifestUrl: string } | null;
     labelUrl: string;
+    packedAt: string | null;
+    photos: { id: string; url: string; at: string }[];
     events: { status: string; location: string | null; remark: string | null; at: string }[];
-    flags: { id: string; type: string; title: string; message: string; owner: string | null; action: string | null; note: string | null; open: boolean; createdAt: string }[];
+    flags: { id: string; type: string; title: string; message: string; owner: string | null; action: string | null; note: string | null; escalationLevel: number; open: boolean; createdAt: string }[];
   }[];
   messages: { from: string; name: string | null; body: string; channel: string; at: string }[];
   history: { action: string; by: string; at: string; after: unknown }[];
@@ -352,3 +356,83 @@ export const changePassword = (current: string, next: string) =>
   request<{ ok: boolean }>("/api/auth/password", { method: "POST", body: JSON.stringify({ current, next }) });
 export const resetPassword = (userId: string, next: string) =>
   request<{ ok: boolean; name: string }>("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ userId, next }) });
+
+// ---------- Alerts, messages, summary ----------
+
+export type BellItem = { id: string; kind: string; title: string; body: string; link: string | null; read: boolean; at: string };
+export const getBell = () => request<{ unread: number; items: BellItem[] }>("/api/notifications/mine");
+export const markAllRead = () => request<{ ok: boolean }>("/api/notifications/read", { method: "POST" });
+export const markRead = (id: string) => request<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: "POST" });
+
+export type OutboxRow = { id: string; channel: "WHATSAPP" | "SMS" | "EMAIL"; to: string; kind: string; title: string; body: string; status: string; at: string };
+export const getOutbox = (page = 1) => request<{ total: number; page: number; pages: number; rows: OutboxRow[] }>(`/api/messages?page=${page}`);
+
+export type DailySummaryData = {
+  day: string;
+  booked: number;
+  pickedUp: number;
+  delivered: number;
+  rtoStarted: number;
+  stuck: number;
+  redFlagsOpen: number;
+  critical: number;
+  overdue: number;
+  codPending: number;
+  codPendingOrders: number;
+  advancesHeld: number;
+  freightToday: number;
+  pickups: { due: number; done: number; missed: number };
+  topProblems: { title: string; message: string; owner: string }[];
+};
+export type Summary = { day: string; createdAt: string; data: DailySummaryData; text: string } | null;
+export const getLatestSummary = () => request<Summary>("/api/summary/latest");
+export const sendSummaryNow = () => request<Summary>("/api/summary/send-now", { method: "POST" });
+
+// ---------- Pickups (upcoming, postpone) and vendor view ----------
+
+export type UpcomingPickup = {
+  id: string;
+  warehouse: { code: string; name: string; area: string };
+  slot: string;
+  slotStart: string;
+  courier: string;
+  status: string;
+  executive: string | null;
+  postponeReason: string | null;
+  canPostpone: boolean;
+  parcelCount: number;
+  packed: number;
+  manifestUrl: string;
+  parcels: {
+    id: string;
+    awb: string;
+    orderNumber: string;
+    product: string;
+    brand: string;
+    city: string;
+    pincode: string;
+    payment: string;
+    weightKg: number;
+    packed: boolean;
+    photos: string[];
+  }[];
+};
+export type PickupDay = { day: string; pickups: UpcomingPickup[] };
+export const getUpcomingPickups = () => request<PickupDay[]>("/api/pickups");
+export const postponePickup = (id: string, reason: string) =>
+  request<{ ok: boolean; movedTo: string }>(`/api/pickups/${id}/postpone`, { method: "POST", body: JSON.stringify({ reason }) });
+
+export const vendorLogin = (phone: string) =>
+  request<LoginStep>("/api/auth/vendor-login", { method: "POST", body: JSON.stringify({ phone }) });
+export type VendorToday = { warehouse: { code: string; name: string; city: string; contactName: string }; days: PickupDay[] };
+export const getVendorToday = () => request<VendorToday>("/api/vendor/today");
+export const markPacked = (shipmentIds: string[], packed = true) =>
+  request<{ ok: boolean }>("/api/vendor/packed", { method: "POST", body: JSON.stringify({ shipmentIds, packed }) });
+export const uploadPackingPhoto = (shipmentId: string, dataUrl: string) =>
+  request<{ id: string }>(`/api/vendor/shipments/${shipmentId}/photos`, { method: "POST", body: JSON.stringify({ dataUrl }) });
+export const photoUrl = (id: string) => `${API_URL}/api/photos/${id}`;
+
+// ---------- Weight check ----------
+
+export const getWeightHint = (product: string) =>
+  request<{ product: string; samples: number; typicalGrams: number | null }>(`/api/weight-hint?product=${encodeURIComponent(product)}`);

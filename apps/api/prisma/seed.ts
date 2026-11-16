@@ -61,6 +61,15 @@ async function main() {
     });
   }
 
+  // One vendor login per pickup warehouse: mobile number + one-time code, own warehouse only.
+  for (const w of await prisma.warehouse.findMany({ where: { brandId: brand.id } })) {
+    await prisma.user.upsert({
+      where: { brandId_phone: { brandId: brand.id, phone: w.contactPhone } },
+      update: {},
+      create: { brandId: brand.id, name: `${w.name} team`, phone: w.contactPhone, role: 'VENDOR', warehouseId: w.id },
+    });
+  }
+
   // New orders waiting to be booked (they show in "To pack").
   const pickupWarehouses = await prisma.warehouse.findMany({ where: { brandId: brand.id }, orderBy: { code: 'asc' } });
   const fresh = [

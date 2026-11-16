@@ -9,7 +9,8 @@ import { JourneyBoard } from "@/app/(app)/shipments/journey-board";
 import { Badge, Card, DemoBadge, type Tone } from "@/components/ui/primitives";
 import { getOrderFilters, getOrders, labelsUrl, ORDER_TABS, type OrderRow, type OrderTab } from "@/lib/api";
 import { formatINR } from "@/lib/format";
-import { shipOrders } from "@/lib/ship-orders";
+import { previewShipments, type ShipPreviewRow, shipOrders } from "@/lib/ship-orders";
+import { useShell } from "@/components/shell/app-shell";
 import { useLive } from "@/lib/use-live";
 
 const STATUS: Record<string, { label: string; tone: Tone }> = {
@@ -95,11 +96,33 @@ export function OrdersView({
   const printable = visibleSelected.filter((r) => r.shipmentId).map((r) => r.shipmentId!);
   const shippable = visibleSelected.filter((r) => r.status === "UNBOOKED");
 
-  async function shipSelected() {
+  const { canShip } = useShell();
+  const [preview, setPreview] = useState<ShipPreviewRow[] | null>(null);
+
+  /** Step 1: show what will be booked. Nothing books until Confirm. */
+  async function openPreview() {
     setShipping(true);
     setNotice(null);
     try {
-      const res = await shipOrders(shippable.map((r) => r.id));
+      setPreview(await previewShipments(shippable.map((r) => r.id)));
+    } catch (e) {
+      setNotice({ tone: "red", text: (e as Error).message });
+    } finally {
+      setShipping(false);
+    }
+  }
+
+  /** Step 2: book the previewed orders that have a courier. */
+  async function shipSelected() {
+    const ready = (preview ?? []).filter((p) => !p.problem);
+    setShipping(true);
+    setNotice(null);
+    try {
+      const res = await shipOrders(
+        ready.map((p) => p.order.id),
+        ready.map((p) => p.order),
+      );
+      setPreview(null);
       setNotice({
         tone: res.failed ? "red" : "green",
         text: res.failed
@@ -218,13 +241,13 @@ export function OrdersView({
               {visibleSelected.length ? (
                 <span className="text-[13px] font-medium text-ink-2">{visibleSelected.length} selected</span>
               ) : null}
-              {shippable.length ? (
+              {shippable.length && canShip ? (
                 <button
-                  onClick={shipSelected}
+                  onClick={openPreview}
                   disabled={shipping}
                   className="flex h-9 items-center gap-1.5 rounded-lg bg-brand-orange px-3 text-[13px] font-semibold text-white hover:bg-brand-orange-dark disabled:opacity-60"
                 >
-                  {shipping ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Ship {shippable.length} with best courier
+                  {shipping && !preview ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Ship {shippable.length} with best courier
                 </button>
               ) : null}
               <a
@@ -314,7 +337,78 @@ export function OrdersView({
           </>
         )}
       </Card>
+      {preview ? <ShipPreview rows={preview} busy={shipping} onCancel={() => setPreview(null)} onConfirm={shipSelected} /> : null}
     </>
+  );
+}
+
+function ShipPreview({ rows, busy, onCancel, onConfirm }: { rows: ShipPreviewRow[]; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const ok = rows.filter((r) => !r.problem);
+  const total = ok.reduce((n, r) => n + (r.quote?.total ?? 0), 0);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-navy/40 p-0 sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label="Review before shipping">
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl">
+        <div className="border-b border-line px-5 py-4">
+          <h2 className="font-display text-lg font-bold text-navy">Review before shipping</h2>
+          <p className="mt-0.5 text-[13px] text-muted">Each order goes with the cheapest courier that picks up on time (85%+), at the earliest pickup slot it can confirm.</p>
+        </div>
+        <div className="overflow-auto">
+          <table className="w-full min-w-[620px] text-left text-[13px]">
+            <thead className="sticky top-0 border-b border-line bg-page text-[11.5px] font-semibold uppercase tracking-wide text-muted">
+              <tr>
+                <th className="px-5 py-2.5">Order</th>
+                <th className="py-2.5 pr-3">Deliver to</th>
+                <th className="py-2.5 pr-3">Courier</th>
+                <th className="py-2.5 pr-3">Delivery</th>
+                <th className="py-2.5 pr-5 text-right">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.order.id} className={clsx("border-b border-line/70", r.problem && "bg-flag-red-soft/50")}>
+                  <td className="px-5 py-2.5">
+                    <div className="font-semibold text-ink">#{r.order.orderNumber}</div>
+                    <div className="text-xs text-muted">{r.order.brand}</div>
+                  </td>
+                  <td className="py-2.5 pr-3 text-ink-2">
+                    {r.order.customer.city || r.order.customer.pincode} {r.order.customer.pincode}
+                  </td>
+                  <td className="py-2.5 pr-3">
+                    {r.quote ? (
+                      <span className="flex items-center gap-1.5 text-ink">
+                        {r.quote.courierName} {r.quote.mode === "DEMO" ? <DemoBadge /> : null}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-medium text-flag-red">{r.problem}</span>
+                    )}
+                  </td>
+                  <td className="py-2.5 pr-3 text-ink-2">{r.quote ? `${r.quote.etaDays} days` : "—"}</td>
+                  <td className="py-2.5 pr-5 text-right font-semibold text-ink">{r.quote ? formatINR(r.quote.total) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-4">
+          <span className="text-[13px] text-ink-2">
+            <span className="font-semibold text-ink">{ok.length}</span> to ship · {formatINR(total)}
+            {rows.length - ok.length ? <span className="text-flag-red"> · {rows.length - ok.length} skipped</span> : null}
+          </span>
+          <span className="flex gap-2">
+            <button onClick={onCancel} className="h-10 rounded-lg border border-line bg-white px-4 text-sm font-medium text-ink-2 hover:bg-page">
+              Go back
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={busy || ok.length === 0}
+              className="flex h-10 items-center gap-2 rounded-lg bg-brand-orange px-4 text-sm font-semibold text-white hover:bg-brand-orange-dark disabled:opacity-60"
+            >
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Confirm and ship {ok.length}
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 

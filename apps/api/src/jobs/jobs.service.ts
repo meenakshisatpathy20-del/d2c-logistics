@@ -1,5 +1,6 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
+import { AlertsService } from '../alerts/alerts.service.js';
 import { PickupsService } from '../pickups/pickups.service.js';
 import { TrackingService } from '../tracking/tracking.service.js';
 
@@ -15,6 +16,7 @@ export class JobsService implements OnApplicationBootstrap {
   constructor(
     private readonly pickups: PickupsService,
     private readonly tracking: TrackingService,
+    private readonly alerts: AlertsService,
   ) {}
 
   /**
@@ -41,6 +43,8 @@ export class JobsService implements OnApplicationBootstrap {
   async runOnce(now: Date) {
     const pickups = await this.pickups.run(now);
     const tracking = await this.tracking.sync(now);
-    return { pickups, tracking };
+    // After the rules: alert owners of new problems, escalate overdue ones, daily messages.
+    const alerts = await this.alerts.run(now);
+    return { pickups, tracking, alerts };
   }
 }

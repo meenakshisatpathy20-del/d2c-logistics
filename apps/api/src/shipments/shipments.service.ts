@@ -1,11 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { BrandService } from '../common/brand.service.js';
-import { closedReason, istDayStart, nextBookableSlot, slotAfter, slotLabel, slotWindow } from '../common/ist.js';
+import { closedReason, istDayStart, nextBookableSlot, slotLabel, slotWindow } from '../common/ist.js';
 import { CouriersService } from '../couriers/couriers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { BookOrder, BulkBook } from './booking.schema.js';
 import { initials, laneFor } from './lanes.js';
 import { rtoRisk } from '../common/rto-risk.js';
+import { openSlot } from '../common/open-slot.js';
 
 
 @Injectable()
@@ -69,19 +70,13 @@ export class ShipmentsService {
 
     let { slotStart, slotEnd } = input.slot ? slotWindow(now, input.slot.day, input.slot.startHour) : nextBookableSlot(now);
     // A slot whose pickup already happened (or was missed) is closed to new parcels.
-    for (let i = 0; i < 12; i++) {
-      const taken = await this.prisma.pickup.findUnique({
-        where: { warehouseId_courierCode_slotStart: { warehouseId: warehouse.id, courierCode: quote.courierCode, slotStart } },
-      });
-      if (taken?.status === 'CANCELLED') {
-        // Called off because its parcels were cancelled: open it again for this one.
-        await this.prisma.pickup.update({ where: { id: taken.id }, data: { status: 'SCHEDULED' } });
-        break;
-      }
-      if (!taken || ['SCHEDULED', 'CONFIRMED'].includes(taken.status)) break;
-      if (input.slot) throw new BadRequestException(`The ${slotLabel(slotStart)} pickup is already closed. Pick a later slot.`);
-      ({ slotStart, slotEnd } = slotAfter(slotStart));
+    const open = await openSlot(this.prisma, warehouse.id, quote.courierCode, { slotStart, slotEnd }, !!input.slot);
+    if (!open) {
+      throw new BadRequestException(
+        input.slot ? `The ${slotLabel(slotStart)} pickup is already closed. Pick a later slot.` : 'No open pickup slot found for this courier. Contact operations.',
+      );
     }
+    ({ slotStart, slotEnd } = open);
     const closed = closedReason(slotStart);
     if (closed) throw new BadRequestException(`Couriers do not pick up on that day (${closed}). Pick another slot.`);
     if (slotStart.getTime() - now.getTime() < 2 * 60 * 60 * 1000) {

@@ -1,3 +1,5 @@
+import { weightWarning } from "./weight-check";
+
 /**
  * Bulk order CSV checks. Columns follow our current Velocity bulk sheet so the
  * team does not relearn a format. Every row is checked before anything books.
@@ -31,6 +33,8 @@ export type BulkRow = Record<(typeof BULK_COLUMNS)[number], string> & {
   brand: string;
   product: string;
   advance_paid: string;
+  /** A weight that will likely be charged higher; shown, but does not stop booking. */
+  warning: string | null;
   line: number;
   errors: string[];
 };
@@ -70,7 +74,7 @@ export function parseBulkCsv(text: string, knownWarehouses: string[], seenOrderI
       string
     >;
     const optional = (c: (typeof OPTIONAL_COLUMNS)[number]) => (header.includes(c) ? (cells[header.indexOf(c)] ?? "") : "");
-    const row: BulkRow = { ...values, brand: optional("brand"), product: optional("product"), advance_paid: optional("advance_paid"), line: i + 2, errors: [] };
+    const row: BulkRow = { ...values, brand: optional("brand"), product: optional("product"), advance_paid: optional("advance_paid"), warning: null, line: i + 2, errors: [] };
 
     if (!row.order_id) row.errors.push("Order ID is empty");
     else if (ids.has(row.order_id)) row.errors.push("Duplicate order ID");
@@ -90,6 +94,7 @@ export function parseBulkCsv(text: string, knownWarehouses: string[], seenOrderI
       else if (adv >= Number(row.order_value)) row.errors.push("Advance must be less than the order value");
     }
     if (!knownWarehouses.includes(row.pickup_warehouse_id)) row.errors.push("Unknown pickup warehouse ID");
+    row.warning = weightWarning(Math.round(Number(row.weight_kg) * 1000), Number(row.length_cm), Number(row.breadth_cm), Number(row.height_cm));
     if (row.rto_warehouse_id && !knownWarehouses.includes(row.rto_warehouse_id)) {
       row.errors.push("Unknown RTO warehouse ID");
     }

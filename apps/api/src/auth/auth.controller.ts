@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SessionUser } from './auth.guard.js';
 import { AuthService } from './auth.service.js';
 import { Public } from './public.decorator.js';
+import { Roles } from './roles.decorator.js';
 import { sessionCookie } from './session.js';
 
 const LoginSchema = z.object({ email: z.string().trim().email('Enter a valid email'), password: z.string().min(1, 'Enter your password').max(200) });
@@ -15,6 +16,7 @@ const NewPassword = z
   .regex(/\d/, 'Use at least one number');
 const ChangeSchema = z.object({ current: z.string().min(1, 'Enter your current password'), next: NewPassword });
 const ResetSchema = z.object({ userId: z.string().min(10), next: NewPassword });
+const VendorLoginSchema = z.object({ phone: z.string().regex(/^[6-9]\d{9}$/, 'Enter your 10-digit mobile number') });
 const VerifySchema = z.object({ challengeId: z.string().min(10).max(40), code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') });
 
 type Req = { ip?: string; user?: SessionUser };
@@ -39,6 +41,13 @@ export class AuthController {
   }
 
   @Public()
+  @Post('vendor-login')
+  @HttpCode(200)
+  vendorLogin(@Body() body: unknown, @Req() req: Req) {
+    return this.auth.vendorLogin(parse(VendorLoginSchema, body).phone, req.ip ?? 'unknown');
+  }
+
+  @Public()
   @Post('verify')
   @HttpCode(200)
   async verify(@Body() body: unknown, @Res({ passthrough: true }) res: Res) {
@@ -56,6 +65,7 @@ export class AuthController {
     return { ok: true };
   }
 
+  @Roles('ADMIN', 'OPS', 'WAREHOUSE', 'SUPPORT', 'FINANCE')
   @Post('password')
   @HttpCode(200)
   changePassword(@Body() body: unknown, @Req() req: Req) {
@@ -63,6 +73,7 @@ export class AuthController {
     return this.auth.changePassword(req.user!.id, current, next);
   }
 
+  @Roles('ADMIN')
   @Post('reset-password')
   @HttpCode(200)
   resetPassword(@Body() body: unknown, @Req() req: Req) {
@@ -70,6 +81,7 @@ export class AuthController {
     return this.auth.resetPassword(req.user!, userId, next);
   }
 
+  @Roles('ADMIN', 'OPS', 'WAREHOUSE', 'SUPPORT', 'FINANCE', 'VENDOR', 'COURIER')
   @Get('me')
   me(@Req() req: Req) {
     return req.user;

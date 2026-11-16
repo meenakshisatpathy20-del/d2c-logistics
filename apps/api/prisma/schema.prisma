@@ -27,6 +27,8 @@ model Brand {
   tasks      Task[]
   redFlags   RedFlag[]
   auditLogs  AuditLog[]
+  notifications Notification[]
+  summaries     DailySummary[]
 }
 
 enum Role {
@@ -60,6 +62,7 @@ model User {
   ownedTasks Task[]    @relation("TaskOwner")
   ownedFlags RedFlag[] @relation("FlagOwner")
   challenges LoginChallenge[]
+  notifications Notification[]
 
   @@unique([brandId, phone])
 }
@@ -220,6 +223,8 @@ model Shipment {
   courierWeightG   Int? // weight the courier measured at pickup; above chargedWeightG = weight dispute
   labelUrl         String?
   packingProofUrls String[]
+  packedAt         DateTime? // vendor marked "packed and ready"
+  photos           PackingPhoto[]
   expectedDelivery DateTime?
   etaDays          Int            @default(3)
   pickupId         String?
@@ -341,6 +346,8 @@ model RedFlag {
   dueAt      DateTime?
   action     String? // the one-tap fix shown in "Needs you"
   note       String? // what was done, e.g. 'RCA sent to Ekart'
+  escalationLevel Int       @default(0) // 0 owner, 1 manager, 2 courier account manager, 3 founder
+  escalatedAt     DateTime?
   actedAt    DateTime?
   resolvedAt DateTime?
   createdAt  DateTime     @default(now())
@@ -383,4 +390,62 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   @@index([brandId, entityType, entityId])
+}
+
+// ---------- Alerts, messages and summaries ----------
+
+enum Channel {
+  APP // the bell in the app
+  WHATSAPP
+  SMS
+  EMAIL
+}
+
+/// Every alert and message the platform sends. Until WhatsApp, SMS and email
+/// accounts are approved, messages are kept here marked DEMO and not sent.
+model Notification {
+  id        String    @id @default(cuid())
+  brandId   String
+  brand     Brand     @relation(fields: [brandId], references: [id])
+  userId    String? // set for team alerts (shows on that person's bell)
+  user      User?     @relation(fields: [userId], references: [id])
+  channel   Channel
+  to        String // phone, email or name
+  kind      String // FLAG, ESCALATION, DAILY_SUMMARY, VENDOR_PICKUPS, PICKUP_POSTPONED
+  title     String
+  body      String
+  link      String? // opens the exact screen the alert is about
+  status    String    @default("DEMO") // DEMO (kept, not sent), SENT, FAILED
+  dedupeKey String?   @unique // the same alert is never sent twice
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([brandId, createdAt])
+  @@index([userId, readAt])
+}
+
+/// The 9 pm summary for management, one per day.
+model DailySummary {
+  id        String   @id @default(cuid())
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id])
+  day       String // YYYY-MM-DD in IST
+  data      Json
+  createdAt DateTime @default(now())
+
+  @@unique([brandId, day])
+}
+
+/// Packing proof: photos of the packed parcel, taken by the vendor at packing time.
+model PackingPhoto {
+  id           String   @id @default(cuid())
+  shipmentId   String
+  shipment     Shipment @relation(fields: [shipmentId], references: [id])
+  mime         String
+  data         Bytes
+  sizeBytes    Int
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([shipmentId])
 }

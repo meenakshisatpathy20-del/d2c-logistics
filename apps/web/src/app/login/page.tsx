@@ -222,7 +222,12 @@ function SignIn() {
         ) : null}
       </form>
 
-      <p className="mt-10 text-center text-xs text-faint">Vendor and courier partners sign in here too, with their own access.</p>
+      <p className="mt-10 text-center text-[13px] text-muted">
+        Vendor partner?{" "}
+        <a href="/v/login" className="font-medium text-brand-blue hover:underline">
+          Sign in with your mobile number
+        </a>
+      </p>
       <p className="mt-2 text-center text-xs text-faint">A D2C Ecommerce India platform</p>
     </motion.div>
   );

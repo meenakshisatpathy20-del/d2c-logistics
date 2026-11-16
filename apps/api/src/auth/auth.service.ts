@@ -35,20 +35,31 @@ export class AuthService {
     const ok = await verifyPassword(password, user?.passwordHash);
     if (!user || !user.active || !ok) throw new UnauthorizedException('Email or password is wrong');
 
+    return this.challenge(user.id, maskEmail(user.email!), now);
+  }
+
+  /**
+   * Vendor partners sign in on their phone with mobile number + one-time code
+   * (no password), from the link in their 9 am WhatsApp message.
+   */
+  async vendorLogin(phone: string, ip: string, now = new Date()) {
+    if (!this.loginLimit.hit(`${ip}:${phone}`, now.getTime())) {
+      throw new HttpException('Too many attempts. Try again in 15 minutes.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const user = await this.prisma.user.findFirst({ where: { phone, role: 'VENDOR', active: true } });
+    if (!user) throw new UnauthorizedException('This number is not registered as a vendor. Ask D2C operations to add it.');
+    return this.challenge(user.id, `+91 ${phone.slice(0, 2)}••••••${phone.slice(-2)}`, now);
+  }
+
+  private async challenge(userId: string, sentTo: string, now: Date) {
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const challenge = await this.prisma.loginChallenge.create({
-      data: { userId: user.id, codeHash: 'pending', expiresAt: new Date(now.getTime() + OTP_MINUTES * 60_000), createdAt: now },
+      data: { userId, codeHash: 'pending', expiresAt: new Date(now.getTime() + OTP_MINUTES * 60_000), createdAt: now },
     });
     await this.prisma.loginChallenge.update({ where: { id: challenge.id }, data: { codeHash: hashCode(challenge.id, code) } });
-
     const demo = (process.env.OTP_DELIVERY ?? 'demo') === 'demo';
-    if (demo) this.log.log(`Demo sign-in code for ${maskEmail(user.email!)}: ${code}`);
-    return {
-      challengeId: challenge.id,
-      sentTo: maskEmail(user.email!),
-      expiresInMinutes: OTP_MINUTES,
-      ...(demo ? { demoCode: code } : {}),
-    };
+    if (demo) this.log.log(`Demo sign-in code for ${sentTo}: ${code}`);
+    return { challengeId: challenge.id, sentTo, expiresInMinutes: OTP_MINUTES, ...(demo ? { demoCode: code } : {}) };
   }
 
   /** Change your own password: the current one must be right. */

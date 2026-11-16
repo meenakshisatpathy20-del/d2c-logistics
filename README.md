@@ -48,6 +48,18 @@ On Render set `SESSION_SECRET` (any long random text), `REQUIRE_SESSION_SECRET=t
 and `COOKIE_SECURE=true`, and set `DEMO_PASSWORD` to a private value before the first deploy.
 Everyone can change their password in Settings; an admin can reset a forgotten one.
 
+### Alerts, vendors and messages
+
+- Every problem goes to its owner (app bell + WhatsApp). Past its deadline it
+  climbs: manager → courier account manager (email) → founder.
+- 9 pm daily summary to admins; 9 am pickup list to each vendor.
+- Vendor partners sign in at `/v` with their mobile number + one-time code and
+  see only their own warehouse (demo vendors: `9800000010`–`9800000014`).
+- Until WhatsApp (Meta), SMS (DLT) and email accounts are approved
+  (`MESSAGING_MODE=DEMO`, the default), messages are kept in **Messages**
+  marked Demo instead of being sent. Links in messages use `PUBLIC_URL`
+  (Render's own address is used if it is not set).
+
 ### Free plan sleep
 
 The free plan sleeps after 15 idle minutes, which pauses the pickup and tracking

@@ -14,6 +14,7 @@ import {
   bulkBook,
   fetchRates,
   getWarehouses,
+  getWeightHint,
   type RateQuote,
   type Warehouse,
 } from "@/lib/api";
@@ -21,6 +22,7 @@ import { BULK_COLUMNS, type BulkRow, parseBulkCsv, SAMPLE_BULK_CSV, SAMPLE_BULK_
 import { codAdvanceFor } from "@/lib/cod-advance";
 import { formatINR } from "@/lib/format";
 import { slotOptions } from "@/lib/pickup-slots";
+import { weightWarning } from "@/lib/weight-check";
 
 export function BookingPanel({
   open,
@@ -139,6 +141,7 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
   const [warehouse, setWarehouse] = useState(warehouses[0].code);
   const [pincode, setPincode] = useState("");
   const [weight, setWeight] = useState("");
+  const [typicalGrams, setTypicalGrams] = useState<number | null>(null);
   const [dims, setDims] = useState({ l: "", b: "", h: "" });
   const [payment, setPayment] = useState<"PREPAID" | "COD">("COD");
   const [orderValue, setOrderValue] = useState("");
@@ -210,6 +213,23 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
       ctrl.abort();
     };
   }, [origin, pincode, weight, dims, payment, collect, parcelReady]);
+
+  // Weight check: the usual weight of this product in our past orders.
+  useEffect(() => {
+    const name = productName.trim();
+    if (name.length < 3) return;
+    const t = setTimeout(() => {
+      getWeightHint(name).then((h) => setTypicalGrams(h.typicalGrams), () => setTypicalGrams(null));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [productName]);
+  const weightWarn = weightWarning(
+    Math.round(Number(weight) * 1000),
+    Number(dims.l) || 0,
+    Number(dims.b) || 0,
+    Number(dims.h) || 0,
+    productName.trim().length >= 3 ? typicalGrams : null,
+  );
 
   const serviceable = quotes?.filter((q) => q.serviceable) ?? [];
   const fastest = serviceable.length ? Math.min(...serviceable.map((q) => q.etaDays)) : null;
@@ -440,6 +460,11 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
                   ))}
                 </div>
               </Field>
+              {weightWarn ? (
+                <p className="mt-2 rounded-lg bg-brand-amber-soft px-3 py-2 text-[12.5px] font-medium text-[#b54708]" role="status">
+                  ⚠ {weightWarn}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
               {(["COD", "PREPAID"] as const).map((p) => (
@@ -771,6 +796,8 @@ function BulkUpload({ warehouses }: { warehouses: Warehouse[] }) {
                         <span className={clsx("mt-0.5 block text-xs", outcome.ok ? "text-[#0e6e05]" : "font-medium text-flag-red")}>
                           {outcome.ok ? `Booked with ${outcome.courier} · AWB ${outcome.awb}` : outcome.error}
                         </span>
+                      ) : r.warning ? (
+                        <span className="mt-0.5 block text-xs font-medium text-[#b54708]">⚠ {r.warning}</span>
                       ) : (
                         <span className="mt-0.5 block text-xs text-muted">Ships from {r.pickup_warehouse_id}</span>
                       )}

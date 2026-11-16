@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Header, Param, Patch, Post, Query, Req, StreamableFile } from '@nestjs/common';
 import type { SessionUser } from '../auth/auth.guard.js';
+import { MONEY, Roles, SHIPPERS } from '../auth/roles.decorator.js';
 import { COD_ADVANCE_POLICY, codAdvanceFor } from '../common/cod-advance.js';
 import { BookOrderSchema, BulkBookSchema } from './booking.schema.js';
 import { DocumentsService } from './documents.service.js';
@@ -29,9 +30,15 @@ export class ShipmentsController {
     return this.orders.list(parse(OrdersQuerySchema, query));
   }
 
+  @Roles(...MONEY)
   @Get('payments/summary')
   payments() {
     return this.orders.payments();
+  }
+
+  @Get('weight-hint')
+  weightHint(@Query('product') product?: string) {
+    return this.orders.weightHint(product ?? '');
   }
 
   @Get('orders/filters')
@@ -44,11 +51,13 @@ export class ShipmentsController {
     return this.orders.detail(id);
   }
 
+  @Roles(...SHIPPERS)
   @Patch('orders/:id')
   edit(@Param('id') id: string, @Body() body: unknown, @Req() req: { user?: SessionUser }) {
     return this.orders.edit(id, parse(EditOrderSchema, body), req.user?.id);
   }
 
+  @Roles(...SHIPPERS)
   @Post('orders/:id/cancel')
   cancel(@Param('id') id: string, @Body() body: unknown, @Req() req: { user?: SessionUser }) {
     const { scope, reason } = parse(CancelSchema, body);
@@ -68,8 +77,8 @@ export class ShipmentsController {
 
   @Post('flags/:id/act')
   act(@Param('id') id: string, @Body() body: unknown, @Req() req: { user?: SessionUser }) {
-    const actor = req.user ?? { id: '', name: 'Team' };
-    return this.flags.act(id, parse(FlagActionSchema, body), { id: actor.id, name: actor.name });
+    const actor = req.user ?? { id: '', name: 'Team', role: 'ADMIN' };
+    return this.flags.act(id, parse(FlagActionSchema, body), { id: actor.id, name: actor.name, role: actor.role });
   }
 
   @Get('team')
@@ -82,11 +91,13 @@ export class ShipmentsController {
     return this.shipments.board();
   }
 
+  @Roles(...SHIPPERS)
   @Post('shipments')
   book(@Body() body: unknown) {
     return this.shipments.book(parse(BookOrderSchema, body));
   }
 
+  @Roles(...SHIPPERS)
   @Post('shipments/bulk')
   bulk(@Body() body: unknown) {
     return this.shipments.bulk(parse(BulkBookSchema, body));

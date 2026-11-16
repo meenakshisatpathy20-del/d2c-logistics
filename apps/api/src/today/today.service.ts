@@ -65,6 +65,7 @@ export class TodayService {
       detail: f.shipment ? `#${f.shipment.order.orderNumber} · ${f.shipment.order.productBrand ?? ''} · ${f.message}`.replace(' ·  · ', ' · ') : f.message,
       owner: f.owner?.name ?? 'Unassigned',
       ownerId: f.ownerId,
+      escalationLevel: f.escalationLevel,
       due: dueLabel(f.dueAt, now),
       overdue: !!f.dueAt && f.dueAt < now,
       action: f.action ?? 'Open',

@@ -4,6 +4,7 @@ import clsx from "clsx";
 import {
   ArrowLeft,
   Ban,
+  Camera,
   Check,
   CircleAlert,
   FileText,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useCallback, useState } from "react";
+import { useShell } from "@/components/shell/app-shell";
 import { Badge, Button, Card, DemoBadge, Field, inputClass, type Tone } from "@/components/ui/primitives";
 import { actOnFlag, announceShipmentsChanged, cancelOrder, editOrder, getOrder, type OrderDetail } from "@/lib/api";
 import { formatINR } from "@/lib/format";
@@ -55,7 +57,11 @@ const HISTORY: Record<string, string> = {
   ORDER_CANCELLED: "Order cancelled",
   ORDER_EDITED: "Details changed",
   COURIER_BOOKING_CANCELLED: "Moved to another courier; old booking cancelled",
+  PACKED_AND_READY: "Vendor marked packed and ready",
+  PACKED_UNDONE: "Vendor undid packed",
 };
+
+export const ESCALATED = ["", "Overdue · escalated to the manager", "Overdue · escalated to the courier's account manager", "Overdue · escalated to the founder"];
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
@@ -67,6 +73,7 @@ export function OrderDetailView({ id }: { id: string }) {
   const [cancelling, setCancelling] = useState(false);
   const [shipping, setShipping] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const { canShip } = useShell();
 
   if (error && !o) {
     return (
@@ -126,7 +133,7 @@ export function OrderDetailView({ id }: { id: string }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!live && o.status !== "CANCELLED" ? (
+          {canShip && !live && o.status !== "CANCELLED" ? (
             <Button onClick={ship} disabled={shipping}>
               {shipping ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Ship with best courier
             </Button>
@@ -145,12 +152,12 @@ export function OrderDetailView({ id }: { id: string }) {
               </Button>
             </a>
           ) : null}
-          {o.canEdit ? (
+          {canShip && o.canEdit ? (
             <Button variant="secondary" onClick={() => setEditing((v) => !v)}>
               <Pencil size={15} /> Edit
             </Button>
           ) : null}
-          {o.canCancel ? (
+          {canShip && o.canCancel ? (
             <Button variant="secondary" onClick={() => setCancelling((v) => !v)} className="text-flag-red">
               <Ban size={15} /> Cancel
             </Button>
@@ -254,6 +261,37 @@ export function OrderDetailView({ id }: { id: string }) {
                   Earlier bookings: {o.shipments.filter((s) => s.id !== live.id).map((s) => `${s.courier} ${s.awb} (${SCAN[s.status] ?? s.status})`).join(", ")}
                 </p>
               ) : null}
+            </Card>
+          ) : null}
+
+          {live ? (
+            <Card>
+              <SectionTitle
+                icon={<Camera size={16} className="text-brand-green" />}
+                title="Packing proof"
+                right={
+                  live.packedAt ? (
+                    <Badge tone="green" dot>
+                      Packed and ready · {when(live.packedAt)}
+                    </Badge>
+                  ) : (
+                    <Badge tone="amber">Not marked packed yet</Badge>
+                  )
+                }
+              />
+              {live.photos.length ? (
+                <div className="grid grid-cols-3 gap-2 p-4 sm:grid-cols-6">
+                  {live.photos.map((ph) => (
+                    <a key={ph.id} href={ph.url} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-line bg-page">
+                      {/* Packing photos are private and served by the API, so a plain img is used. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={ph.url} alt={`Packing photo ${when(ph.at)}`} className="size-full object-cover" />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p className="px-5 py-4 text-[13px] text-muted">The vendor adds photos of the packed parcel on the scale from their phone. They are used as evidence in weight disputes.</p>
+              )}
             </Card>
           ) : null}
 
@@ -365,6 +403,7 @@ function FlagRow({ flag, onChanged }: { flag: OrderDetail["shipments"][number]["
           {flag.message}
           {flag.owner ? ` · owner ${flag.owner}` : ""}
         </p>
+        {flag.escalationLevel ? <p className="mt-0.5 text-[12px] font-medium text-flag-red">⬆ {ESCALATED[flag.escalationLevel]}</p> : null}
         {acted ? <p className="mt-0.5 text-[12.5px] font-medium text-[#0e6e05]">✓ {flag.note}</p> : null}
         {error ? <p className="mt-0.5 text-xs text-flag-red">{error}</p> : null}
       </div>

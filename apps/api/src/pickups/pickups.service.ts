@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { BrandService } from '../common/brand.service.js';
-import { CONFIRM_LEAD_HOURS, slotAfter, slotLabel } from '../common/ist.js';
+import { CONFIRM_LEAD_HOURS, istAt, istDateKey, istDayStart, slotAfter, slotLabel } from '../common/ist.js';
 import { CouriersService } from '../couriers/couriers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { openSlot } from '../common/open-slot.js';
 
 const HOUR = 60 * 60 * 1000;
 const EXECUTIVES = ['Ramesh K.', 'Sunil P.', 'Imran S.', 'Vikas M.', 'Arif K.', 'Deepak R.', 'Mahesh T.', 'Ravi N.'];
@@ -126,6 +127,96 @@ export class PickupsService {
   }
 
   /**
+   * One-click postpone (by our team or the vendor): every parcel moves to the
+   * next slot the courier can still confirm, with the reason logged.
+   */
+  async postpone(pickupId: string, reason: string, actor: { id: string; name: string; warehouseId?: string | null }, now: Date = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+    const p = await this.prisma.pickup.findFirst({ where: { id: pickupId, brandId }, include: { warehouse: true, courier: true } });
+    if (!p) throw new NotFoundException('Pickup not found');
+    if (actor.warehouseId && actor.warehouseId !== p.warehouseId) throw new NotFoundException('Pickup not found');
+    if (!['SCHEDULED', 'CONFIRMED'].includes(p.status)) throw new BadRequestException('Only an upcoming pickup can be postponed');
+    if (p.slotEnd <= now) throw new BadRequestException('This slot is already over');
+
+    let next = slotAfter(p.slotStart);
+    while (next.slotStart.getTime() - now.getTime() < CONFIRM_LEAD_HOURS * HOUR) next = slotAfter(next.slotStart);
+    const to = await this.moveParcels(p.id, next, false, now);
+    await this.prisma.pickup.update({ where: { id: p.id }, data: { status: 'POSTPONED', postponeReason: reason, movedToId: to?.id } });
+    await this.prisma.auditLog.create({
+      data: { brandId, actorId: actor.id || null, action: 'PICKUP_POSTPONED', entityType: 'Pickup', entityId: p.id, after: { reason, to: to?.id ?? null, by: actor.name }, createdAt: now },
+    });
+    // The parcels may land later than the next slot if that one is closed.
+    const landed = to ? (await this.prisma.pickup.findUniqueOrThrow({ where: { id: to.id } })).slotStart : next.slotStart;
+    const when = `${landed.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' })}, ${slotLabel(landed)}`;
+    return { ok: true, movedTo: when, pickupId: to?.id ?? null, warehouse: { name: p.warehouse.name, contactPhone: p.warehouse.contactPhone }, courier: p.courier.name, slot: slotLabel(p.slotStart) };
+  }
+
+  /** Every pickup from today for the next 7 days, grouped by day: the Pickups screen and the vendor view. */
+  async upcoming(filter: { warehouseId?: string | null } = {}, now: Date = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+    const start = istDayStart(now);
+    const pickups = await this.prisma.pickup.findMany({
+      where: {
+        brandId,
+        slotStart: { gte: start, lt: istAt(now, 24, 7) },
+        parcelCount: { gt: 0 },
+        status: { not: 'CANCELLED' },
+        ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
+      },
+      include: {
+        warehouse: true,
+        courier: true,
+        shipments: {
+          where: { status: { not: 'CANCELLED' } },
+          include: { order: true, photos: { select: { id: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: [{ slotStart: 'asc' }],
+    });
+    const todayKey = istDateKey(now);
+    const tomorrowKey = istDateKey(istAt(now, 12, 1));
+    const days = new Map<string, { day: string; pickups: unknown[] }>();
+    for (const p of pickups) {
+      // A pickup whose parcels all moved elsewhere has nothing left to collect.
+      if (p.shipments.length === 0 && ['REASSIGNED', 'MISSED', 'POSTPONED'].includes(p.status)) continue;
+      const key = istDateKey(p.slotStart);
+      const label =
+        key === todayKey ? 'Today' : key === tomorrowKey ? 'Tomorrow' : p.slotStart.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
+      const group = days.get(key) ?? { day: label, pickups: [] };
+      group.pickups.push({
+        id: p.id,
+        warehouse: { code: p.warehouse.code, name: p.warehouse.name, area: p.warehouse.cluster?.split(' - ').at(-1) ?? p.warehouse.city },
+        slot: slotLabel(p.slotStart),
+        slotStart: p.slotStart,
+        courier: p.courier.name,
+        status: p.status,
+        executive: p.executiveName,
+        postponeReason: p.postponeReason,
+        canPostpone: ['SCHEDULED', 'CONFIRMED'].includes(p.status) && p.slotEnd > now,
+        parcelCount: p.shipments.length,
+        packed: p.shipments.filter((s) => s.packedAt).length,
+        manifestUrl: `/api/pickups/${p.id}/manifest.pdf`,
+        parcels: p.shipments.map((s) => ({
+          id: s.id,
+          awb: s.awb,
+          orderNumber: s.order.orderNumber,
+          product: Array.isArray(s.order.items) ? ((s.order.items[0] as { name?: string })?.name ?? 'Order items') : 'Order items',
+          brand: s.order.productBrand ?? 'D2C',
+          city: s.order.city,
+          pincode: s.order.pincode,
+          payment: s.order.paymentMode === 'COD' ? `COD ${Number(s.order.codAmount)}` : 'Prepaid',
+          weightKg: s.chargedWeightG / 1000,
+          packed: !!s.packedAt,
+          photos: s.photos.map((ph) => ph.id),
+        })),
+      });
+      days.set(key, group);
+    }
+    return [...days.values()];
+  }
+
+  /**
    * Moves every parcel of a pickup to a new slot. With switchCourier, parcels are
    * re-booked with the most reliable courier that delivers to each address.
    */
@@ -185,15 +276,18 @@ export class PickupsService {
         awb = booked.awb;
         charged = booked.chargedAmount;
       }
+      // Never into a slot whose pickup already happened or was missed.
+      const into = await openSlot(this.prisma, from.warehouseId, courierCode, slot);
+      if (!into) continue; // nothing open: the parcel stays put and its red flag stays open
       const pickup = await this.prisma.pickup.upsert({
-        where: { warehouseId_courierCode_slotStart: { warehouseId: from.warehouseId, courierCode, slotStart: slot.slotStart } },
+        where: { warehouseId_courierCode_slotStart: { warehouseId: from.warehouseId, courierCode, slotStart: into.slotStart } },
         update: { parcelCount: { increment: 1 }, missCount },
         create: {
           brandId: from.brandId,
           warehouseId: from.warehouseId,
           courierCode,
-          slotStart: slot.slotStart,
-          slotEnd: slot.slotEnd,
+          slotStart: into.slotStart,
+          slotEnd: into.slotEnd,
           parcelCount: 1,
           missCount,
           createdAt: now,
@@ -215,8 +309,8 @@ export class PickupsService {
               location: from.warehouse.city,
               remark:
                 courierCode !== from.courierCode
-                  ? `Moved from ${from.courier.name} to ${pickup.courier.name}, pickup ${slotLabel(slot.slotStart)}`
-                  : `Pickup moved to ${slotLabel(slot.slotStart)}`,
+                  ? `Moved from ${from.courier.name} to ${pickup.courier.name}, pickup ${slotLabel(into.slotStart)}`
+                  : `Pickup moved to ${slotLabel(into.slotStart)}`,
               occurredAt: now,
               receivedAt: now,
             },

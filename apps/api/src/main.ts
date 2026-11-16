@@ -1,9 +1,12 @@
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Packing photos arrive as data URLs (resized on the phone first), so allow up to 6 MB.
+  app.useBodyParser('json', { limit: '6mb' });
   app.setGlobalPrefix('api');
   // The website forwards /api here, so trust its X-Forwarded-For for the caller's address.
   app.getHttpAdapter().getInstance().set('trust proxy', 'loopback');

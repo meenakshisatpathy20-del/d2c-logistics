@@ -9,7 +9,7 @@ export default function PickupsPage() {
     <>
       <PageHeader
         title="Pickups"
-        subtitle="2-hour slots. Each courier confirms 2 hours before; if not, parcels move to the most reliable courier. No pickups on Sundays or holidays."
+        subtitle="2-hour slots. Couriers confirm 2 hours before or the parcels move to the most reliable courier. Postpone in one click; no pickups on Sundays or holidays."
       />
       <PickupsView />
     </>

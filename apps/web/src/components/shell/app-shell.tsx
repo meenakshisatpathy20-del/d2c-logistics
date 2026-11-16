@@ -2,12 +2,14 @@
 
 import clsx from "clsx";
 import {
+  Bell,
   Calculator,
   ChartNoAxesColumn,
   House,
   IndianRupee,
   LogOut,
   Menu,
+  MessageSquareText,
   Package,
   Plus,
   RotateCcw,
@@ -23,7 +25,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, type ReactNode, Suspense, useCallback, useContext, useEffect, useState } from "react";
 import { BookingPanel } from "@/components/booking/booking-panel";
 import { Logo } from "@/components/ui/logo";
-import { getMe, getOrders, logout, type Me } from "@/lib/api";
+import { getBell, getMe, getOrders, logout, markAllRead, markRead, type Me } from "@/lib/api";
 import { useLive } from "@/lib/use-live";
 
 type Counts = Partial<Record<string, number>>;
@@ -37,11 +39,18 @@ const NAV = [
   { href: "/payments", label: "Payments & COD", icon: IndianRupee },
   { href: "/rates", label: "Rate calculator", icon: Calculator },
   { href: "/reports", label: "Reports", icon: ChartNoAxesColumn },
+  { href: "/messages", label: "Messages", icon: MessageSquareText },
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
-type ShellActions = { openBooking: (mode?: "single" | "bulk") => void };
-const ShellContext = createContext<ShellActions>({ openBooking: () => {} });
+/** Booking, cancelling and changing orders. Mirrors the API's roles. */
+export const SHIPPER_ROLES = ["ADMIN", "OPS", "WAREHOUSE"];
+const MONEY_ROLES = ["ADMIN", "FINANCE", "OPS"];
+const hiddenFor = (href: string, role: string | undefined) =>
+  !!role && ((href === "/payments" && !MONEY_ROLES.includes(role)) || (href === "/messages" && !["ADMIN", "OPS", "SUPPORT"].includes(role)));
+
+type ShellActions = { openBooking: (mode?: "single" | "bulk") => void; me: Me | null; canShip: boolean };
+const ShellContext = createContext<ShellActions>({ openBooking: () => {}, me: null, canShip: false });
 export const useShell = () => useContext(ShellContext);
 
 function isActive(pathname: string, href: string) {
@@ -59,13 +68,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const openBooking = useCallback((mode: "single" | "bulk" = "single") => setBooking(mode), []);
 
   useEffect(() => {
-    getMe().then(setMe, () => {});
+    getMe().then((m) => {
+      // Vendor partners have their own phone view.
+      if (m.role === "VENDOR") window.location.replace("/v");
+      else setMe(m);
+    }, () => {});
   }, []);
+  const canShip = !!me && SHIPPER_ROLES.includes(me.role);
 
   const nav = (onPick?: () => void) => (
     // The current page is only known at request time on order pages, so it streams in.
-    <Suspense fallback={<NavLinks counts={counts} pathname={null} onPick={onPick} />}>
-      <ActiveNav counts={counts} onPick={onPick} />
+    <Suspense fallback={<NavLinks counts={counts} pathname={null} onPick={onPick} role={me?.role} />}>
+      <ActiveNav counts={counts} onPick={onPick} role={me?.role} />
     </Suspense>
   );
 
@@ -93,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <ShellContext.Provider value={{ openBooking }}>
+    <ShellContext.Provider value={{ openBooking, me, canShip }}>
       <div className="min-h-screen lg:pl-[248px]">
         {/* Desktop menu */}
         <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col bg-navy px-3 py-4 lg:flex">
@@ -129,18 +143,24 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Menu size={20} />
             </button>
             <GlobalSearch />
-            <button
-              onClick={() => openBooking("bulk")}
-              className="ml-auto hidden h-10 items-center gap-2 rounded-xl border border-line bg-white px-3.5 text-sm font-medium text-ink-2 hover:bg-page md:flex"
-            >
-              <Upload size={16} /> Bulk upload
-            </button>
-            <button
-              onClick={() => openBooking("single")}
-              className="ml-auto flex h-10 shrink-0 items-center gap-2 rounded-xl bg-brand-orange px-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-orange-dark md:ml-0"
-            >
-              <Plus size={17} /> <span className="hidden sm:inline">Create order</span>
-            </button>
+            <span className="ml-auto" />
+            {canShip ? (
+              <>
+                <button
+                  onClick={() => openBooking("bulk")}
+                  className="hidden h-10 items-center gap-2 rounded-xl border border-line bg-white px-3.5 text-sm font-medium text-ink-2 hover:bg-page md:flex"
+                >
+                  <Upload size={16} /> Bulk upload
+                </button>
+                <button
+                  onClick={() => openBooking("single")}
+                  className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-brand-orange px-3.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-orange-dark"
+                >
+                  <Plus size={17} /> <span className="hidden sm:inline">Create order</span>
+                </button>
+              </>
+            ) : null}
+            <BellMenu />
           </div>
         </header>
 
@@ -152,14 +172,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function ActiveNav(props: { counts: Counts; onPick?: () => void }) {
+function ActiveNav(props: { counts: Counts; onPick?: () => void; role?: string }) {
   return <NavLinks {...props} pathname={usePathname()} />;
 }
 
-function NavLinks({ counts, pathname, onPick }: { counts: Counts; pathname: string | null; onPick?: () => void }) {
+function NavLinks({ counts, pathname, onPick, role }: { counts: Counts; pathname: string | null; onPick?: () => void; role?: string }) {
   return (
     <nav aria-label="Main" className="space-y-0.5">
-      {NAV.map((item) => {
+      {NAV.filter((item) => !hiddenFor(item.href, role)).map((item) => {
         const active = pathname !== null && isActive(pathname, item.href);
         const n = "count" in item ? item.count(counts) : undefined;
         const Icon = item.icon;
@@ -190,6 +210,84 @@ function NavLinks({ counts, pathname, onPick }: { counts: Counts; pathname: stri
         );
       })}
     </nav>
+  );
+}
+
+const loadBell = () => getBell();
+
+/** Alerts for me: new problems I own, escalations, summaries. Each opens the exact screen. */
+function BellMenu() {
+  const router = useRouter();
+  const { data, refresh } = useLive(loadBell, 30_000);
+  const [open, setOpen] = useState(false);
+  const unread = data?.unread ?? 0;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="relative grid size-10 place-items-center rounded-xl text-ink-2 hover:bg-page"
+        aria-label={unread ? `${unread} new alerts` : "Alerts"}
+        aria-expanded={open}
+      >
+        <Bell size={19} />
+        {unread ? (
+          <span className="absolute right-1 top-1 grid min-w-[18px] place-items-center rounded-full bg-flag-red px-1 text-[10px] font-bold leading-[18px] text-white ring-2 ring-white">
+            {unread > 99 ? "99+" : unread}
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <>
+          <button className="fixed inset-0 z-40 cursor-default" aria-label="Close alerts" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-12 z-50 w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-line bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-line px-4 py-3">
+              <span className="text-sm font-semibold text-ink">Alerts</span>
+              {unread ? (
+                <button
+                  onClick={async () => {
+                    await markAllRead();
+                    void refresh();
+                  }}
+                  className="text-xs font-medium text-brand-blue hover:underline"
+                >
+                  Mark all read
+                </button>
+              ) : null}
+            </div>
+            <ul className="max-h-[420px] divide-y divide-line overflow-y-auto">
+              {(data?.items ?? []).length === 0 ? (
+                <li className="px-4 py-8 text-center text-[13px] text-muted">No alerts yet. Problems you own will show here.</li>
+              ) : (
+                data!.items.map((n) => (
+                  <li key={n.id}>
+                    <button
+                      onClick={async () => {
+                        setOpen(false);
+                        if (!n.read) await markRead(n.id).catch(() => {});
+                        void refresh();
+                        if (n.link) router.push(n.link);
+                      }}
+                      className={clsx("block w-full px-4 py-3 text-left hover:bg-page", !n.read && "bg-brand-orange-soft/40")}
+                    >
+                      <span className="flex items-start gap-2">
+                        {!n.read ? <span className="mt-1.5 size-2 shrink-0 rounded-full bg-brand-orange" /> : <span className="mt-1.5 size-2 shrink-0" />}
+                        <span className="min-w-0">
+                          <span className="block text-[13px] font-semibold text-ink">{n.title}</span>
+                          <span className="mt-0.5 line-clamp-2 block whitespace-pre-line text-[12px] text-muted">{n.body}</span>
+                          <span className="mt-1 block text-[11px] text-faint">
+                            {new Date(n.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
+                          </span>
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 

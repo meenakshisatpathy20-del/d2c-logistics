@@ -11,6 +11,6 @@ import { ShipmentsService } from './shipments.service.js';
   imports: [CouriersModule],
   controllers: [ShipmentsController],
   providers: [ShipmentsService, DocumentsService, OrdersService, FlagsService, BrandService],
-  exports: [ShipmentsService, BrandService],
+  exports: [ShipmentsService, BrandService, DocumentsService],
 })
 export class ShipmentsModule {}

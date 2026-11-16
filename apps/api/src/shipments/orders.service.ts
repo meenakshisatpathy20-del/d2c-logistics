@@ -204,6 +204,7 @@ export class OrdersService {
             pickup: true,
             events: { orderBy: { occurredAt: 'desc' } },
             redFlags: { include: { owner: true }, orderBy: { createdAt: 'desc' } },
+            photos: { select: { id: true, createdAt: true }, orderBy: { createdAt: 'asc' } },
           },
         },
       },
@@ -255,6 +256,8 @@ export class OrdersService {
           ? { id: s.pickup.id, slot: slotLabel(s.pickup.slotStart), date: s.pickup.slotStart, status: s.pickup.status, executive: s.pickup.executiveName, manifestUrl: `/api/pickups/${s.pickup.id}/manifest.pdf` }
           : null,
         labelUrl: `/api/shipments/${s.id}/label.pdf`,
+        packedAt: s.packedAt,
+        photos: s.photos.map((p) => ({ id: p.id, url: `/api/photos/${p.id}`, at: p.createdAt })),
         events: s.events.map((e) => ({ status: e.status, location: e.location, remark: e.remark, at: e.occurredAt })),
         flags: s.redFlags.map((f) => ({
           id: f.id,
@@ -264,6 +267,7 @@ export class OrdersService {
           owner: f.owner?.name ?? null,
           action: f.action,
           note: f.note,
+          escalationLevel: f.escalationLevel,
           open: !f.resolvedAt,
           createdAt: f.createdAt,
         })),
@@ -377,6 +381,27 @@ export class OrdersService {
       advances: { held: adv(held), adjusted: adv(adjusted), refunded: adv(refunded), forfeited: adv(forfeited) },
       freight30d: { amount: Number(freight._sum.chargedAmount ?? 0), shipments: freight._count },
     };
+  }
+
+  /**
+   * Weight check before booking: the usual declared weight of this product in
+   * our past orders. A booking far from it is probably a typing mistake, which
+   * becomes a weight dispute later.
+   */
+  async weightHint(product: string) {
+    const brandId = await this.brands.currentBrandId();
+    const name = product.trim();
+    if (name.length < 3) return { product: name, samples: 0, typicalGrams: null };
+    const rows = await this.prisma.order.findMany({
+      where: { brandId, status: { not: 'CANCELLED' }, items: { path: ['0', 'name'], string_contains: name } },
+      select: { weightGrams: true, items: true },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    const same = rows.filter((r) => Array.isArray(r.items) && String((r.items[0] as { name?: string })?.name ?? '').toLowerCase() === name.toLowerCase());
+    const weights = same.map((r) => r.weightGrams).sort((a, b) => a - b);
+    const typical = weights.length >= 2 ? weights[Math.floor(weights.length / 2)] : null;
+    return { product: name, samples: weights.length, typicalGrams: typical };
   }
 
   /** Names for the brand and courier filters. */

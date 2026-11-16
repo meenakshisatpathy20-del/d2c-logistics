@@ -202,13 +202,17 @@ describe('Passwords (e2e)', () => {
     const prisma = app.get(PrismaService);
     const finance = await prisma.user.findUniqueOrThrow({ where: { email: 'finance@d2c.demo' } });
 
+    // Whatever happens below, put the demo password back for the other tests.
+    const original = finance.passwordHash;
+    onTestFinished(() => prisma.user.update({ where: { id: finance.id }, data: { passwordHash: original } }).then(() => undefined));
+
     const a = request.agent(app.getHttpServer());
     const login = await a.post('/api/auth/login').send({ email: 'finance@d2c.demo', password: demo }).expect(200);
     await a.post('/api/auth/verify').send({ challengeId: login.body.challengeId, code: login.body.demoCode }).expect(200);
     await a.post('/api/auth/password').send({ current: 'wrong', next: 'NewPass123' }).expect(401);
     await a.post('/api/auth/password').send({ current: demo, next: 'short' }).expect(400);
     await a.post('/api/auth/password').send({ current: demo, next: 'NewPass123' }).expect(200);
-    await a.post('/api/auth/reset-password').send({ userId: finance.id, next: demo }).expect(401); // not an admin
+    await a.post('/api/auth/reset-password').send({ userId: finance.id, next: demo }).expect(403); // not an admin
     await request(app.getHttpServer()).post('/api/auth/login').send({ email: 'finance@d2c.demo', password: 'NewPass123' }).expect(200);
 
     const admin = await signedIn(app.getHttpServer()); // founder is ADMIN
