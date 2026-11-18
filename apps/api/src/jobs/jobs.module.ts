@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AlertsModule } from '../alerts/alerts.module.js';
 import { CouriersModule } from '../couriers/couriers.module.js';
+import { IssuesController } from '../issues/issues.controller.js';
+import { IssuesService } from '../issues/issues.service.js';
 import { VendorController } from '../vendor/vendor.controller.js';
 import { VendorService } from '../vendor/vendor.service.js';
 import { PickupsService } from '../pickups/pickups.service.js';
@@ -12,8 +14,8 @@ import { JobsService } from './jobs.service.js';
 
 @Module({
   imports: [CouriersModule, ShipmentsModule, AlertsModule],
-  controllers: [TodayController, VendorController],
-  providers: [PickupsService, TrackingService, JobsService, TodayService, VendorService],
+  controllers: [TodayController, VendorController, IssuesController],
+  providers: [PickupsService, TrackingService, JobsService, TodayService, VendorService, IssuesService],
   exports: [JobsService],
 })
 export class JobsModule {}

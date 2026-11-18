@@ -9,12 +9,10 @@ import {
   IndianRupee,
   LogOut,
   Menu,
-  MessageSquareText,
   Package,
   Plus,
-  RotateCcw,
-  Scale,
   Search,
+  Siren,
   Settings,
   Truck,
   Upload,
@@ -25,7 +23,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, type ReactNode, Suspense, useCallback, useContext, useEffect, useState } from "react";
 import { BookingPanel } from "@/components/booking/booking-panel";
 import { Logo } from "@/components/ui/logo";
-import { getBell, getMe, getOrders, logout, markAllRead, markRead, type Me } from "@/lib/api";
+import { getBell, getIssues, getMe, getOrders, logout, markAllRead, markRead, type Me } from "@/lib/api";
 import { useLive } from "@/lib/use-live";
 
 type Counts = Partial<Record<string, number>>;
@@ -34,12 +32,10 @@ const NAV = [
   { href: "/", label: "Home", icon: House },
   { href: "/orders", label: "Orders", icon: Package, count: (c: Counts) => c.NEW, tone: "orange" },
   { href: "/pickups", label: "Pickups", icon: Truck },
-  { href: "/ndr", label: "NDR & Returns", icon: RotateCcw, count: (c: Counts) => c.ATTENTION, tone: "red" },
-  { href: "/weight", label: "Weight disputes", icon: Scale },
+  { href: "/issues", label: "Issues", icon: Siren, count: (c: Counts) => c.ISSUES_OURS, tone: "red" },
   { href: "/payments", label: "Payments & COD", icon: IndianRupee },
   { href: "/rates", label: "Rate calculator", icon: Calculator },
   { href: "/reports", label: "Reports", icon: ChartNoAxesColumn },
-  { href: "/messages", label: "Messages", icon: MessageSquareText },
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
@@ -47,7 +43,7 @@ const NAV = [
 export const SHIPPER_ROLES = ["ADMIN", "OPS", "WAREHOUSE"];
 const MONEY_ROLES = ["ADMIN", "FINANCE", "OPS"];
 const hiddenFor = (href: string, role: string | undefined) =>
-  !!role && ((href === "/payments" && !MONEY_ROLES.includes(role)) || (href === "/messages" && !["ADMIN", "OPS", "SUPPORT"].includes(role)));
+  !!role && href === "/payments" && !MONEY_ROLES.includes(role);
 
 type ShellActions = { openBooking: (mode?: "single" | "bulk") => void; me: Me | null; canShip: boolean };
 const ShellContext = createContext<ShellActions>({ openBooking: () => {}, me: null, canShip: false });
@@ -57,7 +53,11 @@ function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-const loadCounts = () => getOrders({ size: 5 });
+/** Menu badges: new orders, and issues waiting on us. */
+const loadCounts = async () => {
+  const [orders, issues] = await Promise.all([getOrders({ size: 5 }), getIssues({ waiting: "OURS" })]);
+  return { counts: { ...orders.counts, ISSUES_OURS: issues.total } as Counts };
+};
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [booking, setBooking] = useState<null | "single" | "bulk">(null);

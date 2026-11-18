@@ -1,9 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowRight, Check, CircleDashed, Clock, Loader2, X } from "lucide-react";
-import Link from "next/link";
-import { AllClear, NeedsYouCard } from "@/components/home/needs-you";
+import { Check, CircleDashed, Clock, Loader2, X } from "lucide-react";
+import { WaitingPanel } from "@/components/home/waiting-panel";
 import { StepCards } from "@/components/home/step-cards";
 import { BrandLogo, OUR_BRANDS } from "@/components/ui/logo";
 import { Badge, Card, DemoBadge } from "@/components/ui/primitives";
@@ -39,7 +38,7 @@ function greeting(hour: number) {
 const brandSlug = (name: string) => OUR_BRANDS.find((b) => b.name === name)?.slug;
 
 export function TodayView() {
-  const { data, error, refresh } = useLive(getToday, 30_000);
+  const { data, error } = useLive(getToday, 30_000);
 
   if (error && !data) {
     return (
@@ -83,7 +82,7 @@ export function TodayView() {
       <StepCards pulse={data.pulse} />
 
       <div className="grid gap-6 xl:grid-cols-[400px_1fr] [&>*]:min-w-0">
-        <NeedsYou items={data.needsYou} onChanged={refresh} />
+        <WaitingPanel />
         <Timeline data={data} />
       </div>
 
@@ -138,38 +137,6 @@ export function TodayView() {
         </Card>
       </div>
     </>
-  );
-}
-
-function NeedsYou({ items, onChanged }: { items: TodayData["needsYou"]; onChanged: () => void }) {
-  const open = items.filter((n) => !n.acted).length;
-  return (
-    <section aria-labelledby="needs-you">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 id="needs-you" className="text-[15px] font-semibold text-ink">
-          Needs you {open ? <span className="ml-1 rounded-full bg-flag-red px-1.5 text-[11px] font-bold text-white">{open}</span> : null}
-        </h2>
-        <span className="text-xs text-muted">Critical first · each has one owner</span>
-      </div>
-      {items.length === 0 ? (
-        <AllClear />
-      ) : (
-        <ul className="space-y-3">
-          {items.slice(0, 5).map((n) => (
-            <li key={n.id}>
-              <NeedsYouCard item={n} onChanged={onChanged} />
-            </li>
-          ))}
-          {items.length > 5 ? (
-            <li>
-              <Link href="/ndr" className="flex items-center justify-center gap-1 text-[13px] font-medium text-brand-blue hover:underline">
-                See all {items.length} in NDR &amp; Returns <ArrowRight size={13} />
-              </Link>
-            </li>
-          ) : null}
-        </ul>
-      )}
-    </section>
   );
 }
 

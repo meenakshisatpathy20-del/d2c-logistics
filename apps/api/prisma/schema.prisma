@@ -338,7 +338,7 @@ model RedFlag {
   shipment   Shipment?    @relation(fields: [shipmentId], references: [id])
   pickupId   String?
   pickup     Pickup?      @relation(fields: [pickupId], references: [id])
-  type       String // PICKUP_UNCONFIRMED, PICKUP_MISSED, NO_SCAN_48H, NDR, RTO
+  type       String // PICKUP_UNCONFIRMED, PICKUP_MISSED, NO_SCAN_48H, NDR, RTO, WEIGHT_DISPUTE, or a raised type
   severity   FlagSeverity
   title      String
   message    String
@@ -349,11 +349,25 @@ model RedFlag {
   note       String? // what was done, e.g. 'RCA sent to Ekart'
   escalationLevel Int       @default(0) // 0 owner, 1 manager, 2 courier account manager, 3 founder
   escalatedAt     DateTime?
+  // Issue room: whose turn it is, reminders, promises, outcome.
+  waitingOn       String? // OURS, COURIER, VENDOR, CUSTOMER
+  waitingSince    DateTime?
+  reminderCount   Int       @default(0) // reminders sent with no reply since the turn passed to them
+  lastReminderAt  DateTime?
+  promiseAt       DateTime? // a time the other side committed to
+  promiseText     String?
+  promisesBroken  Int       @default(0)
+  courierContactId String?
+  courierContact  CourierContact? @relation(fields: [courierContactId], references: [id])
+  outcome         String? // what actually solved it: Picked up, Delivered, Credited...
+  faultParty      String? // COURIER, VENDOR, CUSTOMER, OURS, NONE
+  raisedById      String? // a person, when raised by hand
+  events          IssueEvent[]
   actedAt    DateTime?
   resolvedAt DateTime?
   createdAt  DateTime     @default(now())
 
-  @@unique([type, shipmentId, pickupId])
+  @@index([type, shipmentId, pickupId])
   @@index([brandId, resolvedAt])
 }
 
@@ -449,4 +463,38 @@ model PackingPhoto {
   createdAt    DateTime @default(now())
 
   @@index([shipmentId])
+}
+
+/// Everything said and done in an issue room, in order: who, which side, what.
+model IssueEvent {
+  id         String    @id @default(cuid())
+  flagId     String
+  flag       RedFlag   @relation(fields: [flagId], references: [id])
+  kind       String // MESSAGE, CALL_NOTE, PARTNER_REPLY, ASK, PROMISE, REMINDER, PROMISE_BROKEN, ESCALATED, ACTION, RESOLVED, SYSTEM
+  actorId    String?
+  actorName  String
+  actorParty String // OURS, COURIER, VENDOR, CUSTOMER, SYSTEM
+  body       String
+  via        String? // PLATFORM, WHATSAPP, CALL
+  promiseAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([flagId, createdAt])
+}
+
+/// Named people at each courier, so every issue reaches a person, not a group.
+model CourierContact {
+  id          String   @id @default(cuid())
+  brandId     String
+  courierCode String
+  name        String
+  role        String // ACCOUNT_MANAGER, PICKUP_LEAD, HUB, REGIONAL_MANAGER
+  phone       String
+  email       String?
+  region      String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  flags       RedFlag[]
+
+  @@index([brandId, courierCode])
 }

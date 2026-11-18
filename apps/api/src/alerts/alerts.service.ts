@@ -103,9 +103,9 @@ export class AlertsService {
     return app;
   }
 
-  private flagLink(f: { shipment: { orderId: string } | null; type: string }) {
-    if (f.shipment) return `/orders/${f.shipment.orderId}`;
-    return f.type.startsWith('PICKUP') ? '/pickups' : '/ndr';
+  /** Every alert opens the issue room, where the whole story and the actions are. */
+  private flagLink(f: { id: string }) {
+    return `/issues/${f.id}`;
   }
 
   /** Every open problem reaches its owner once (again if the owner changes). */
@@ -173,14 +173,18 @@ export class AlertsService {
           }
         } else if (level === 2) {
           if (courier) {
-            to = `${courier.name} account manager`;
+            // The courier's own account manager, by name, from Settings → Courier contacts.
+            const am =
+              (f.courierContactId ? await this.prisma.courierContact.findUnique({ where: { id: f.courierContactId } }) : null) ??
+              (await this.prisma.courierContact.findFirst({ where: { brandId, courierCode: courier.code, role: 'ACCOUNT_MANAGER', active: true } }));
+            to = am ? `${am.name} (${courier.name} account manager)` : `${courier.name} account manager (no contact added)`;
             await this.send({
               brandId,
-              channel: 'EMAIL',
-              to: `${courier.code.toLowerCase()}.kam@courier.demo`,
+              channel: 'WHATSAPP',
+              to: am ? `+91 ${am.phone}` : to,
               kind: 'ESCALATION',
               title: `Escalation: ${what}`,
-              body: `Dear ${courier.name} team,\n${f.message}${f.shipment ? `\nAWB ${f.shipment.awb}` : ''}\nThis is ${lateText}. Please resolve and reply with the reason (RCA).\nD2C Ecommerce India`,
+              body: `${am ? `Hi ${am.name.replace(/ \(demo\)$/, '')}, ` : ''}${f.title}${f.shipment ? ` · AWB ${f.shipment.awb}` : ''}\n${f.message}\nThis is ${lateText}. Please reply with the reason (RCA), a name and a time. Your reply is recorded on the issue.\nD2C Ecommerce India`,
               link,
               dedupeKey: `esc:${f.id}:2:${round}`,
               now,

@@ -53,13 +53,15 @@ export class FlagsService {
       // A new owner gets a fresh deadline clock: the escalation ladder starts again.
       await this.prisma.redFlag.update({ where: { id }, data: { ownerId: owner.id, escalationLevel: 0, escalatedAt: null } });
       await this.audit(brandId, actor.id, 'FLAG_REASSIGNED', id, { to: owner.name }, now);
+      await this.prisma.issueEvent.create({ data: { flagId: id, kind: 'ACTION', actorId: actor.id, actorName: actor.name, actorParty: 'OURS', body: `Owner changed to ${owner.name}`, createdAt: now } });
       return { ok: true, message: `Assigned to ${owner.name}` };
     }
 
     if (input.kind === 'resolve') {
       const note = input.note || 'Resolved';
-      await this.prisma.redFlag.update({ where: { id }, data: { resolvedAt: now, actedAt: now, note: `${note} · ${actor.name}` } });
+      await this.prisma.redFlag.update({ where: { id }, data: { resolvedAt: now, actedAt: now, outcome: 'Solved', faultParty: 'NONE', note: `${note} · ${actor.name}` } });
       await this.audit(brandId, actor.id, 'FLAG_RESOLVED', id, { note }, now);
+      await this.prisma.issueEvent.create({ data: { flagId: id, kind: 'RESOLVED', actorId: actor.id, actorName: actor.name, actorParty: 'OURS', body: `Closed: ${note}`, createdAt: now } });
       return { ok: true, message: 'Closed' };
     }
 
@@ -81,6 +83,7 @@ export class FlagsService {
       });
     }
     await this.audit(brandId, actor.id, 'FLAG_ACTION', id, { action: what, note: input.note }, now);
+    await this.prisma.issueEvent.create({ data: { flagId: id, kind: 'ACTION', actorId: actor.id, actorName: actor.name, actorParty: 'OURS', body: `${what}${input.note ? `: ${input.note}` : ''}`, createdAt: now } });
     return { ok: true, message: `${what} · done` };
   }
 

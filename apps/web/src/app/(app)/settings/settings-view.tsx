@@ -6,6 +6,9 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useShell } from "@/components/shell/app-shell";
 import { Badge, Button, Card, DemoBadge, Field, inputClass } from "@/components/ui/primitives";
 import {
+  type CourierContactRow,
+  getCourierContacts,
+  saveCourierContact,
   addTeamMember,
   addWarehouse,
   changePassword,
@@ -65,6 +68,16 @@ export function SettingsView() {
 
       <WarehousesCard warehouses={warehouses} canManage={canManage} onChanged={load} />
       <CouriersCard couriers={couriers} canManage={canManage} onChanged={load} />
+      <CourierContactsCard couriers={couriers ?? []} canManage={canManage} />
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
+        <span>
+          <span className="block text-[14.5px] font-semibold text-ink">Message log</span>
+          <span className="block text-xs text-muted">Every WhatsApp, SMS and email the platform sent, or keeps as Demo until the accounts are approved.</span>
+        </span>
+        <a href="/messages" className="text-[13px] font-medium text-brand-blue hover:underline">
+          Open the log →
+        </a>
+      </Card>
     </div>
   );
 }
@@ -485,5 +498,89 @@ function CardTop({ title, sub, action }: { title: string; sub?: string; action?:
       </div>
       {action}
     </div>
+  );
+}
+
+// ---------- Courier contacts ----------
+
+const CONTACT_ROLE: Record<string, string> = { ACCOUNT_MANAGER: "Account manager", PICKUP_LEAD: "Pickup lead", HUB: "Hub", REGIONAL_MANAGER: "Regional manager" };
+
+/** Named people at each courier: every issue goes to a person, and ignored reminders go to their manager. */
+function CourierContactsCard({ couriers, canManage }: { couriers: CourierInfo[]; canManage: boolean }) {
+  const [rows, setRows] = useState<CourierContactRow[] | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState({ courierCode: "", name: "", role: "ACCOUNT_MANAGER", phone: "" });
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => getCourierContacts().then(setRows, () => {}), []);
+  useEffect(() => {
+    const t = setTimeout(load, 0);
+    return () => clearTimeout(t);
+  }, [load]);
+  const name = (code: string) => couriers.find((c) => c.code === code)?.name ?? code;
+  const grouped = Object.entries((rows ?? []).reduce<Record<string, CourierContactRow[]>>((acc, r) => ((acc[r.courierCode] ??= []).push(r), acc), {}));
+  return (
+    <Card>
+      <CardTop
+        title="Courier contacts"
+        sub="Each issue goes to a named person: the pickup lead for pickups, the account manager for everything else. Two ignored reminders and it goes to their regional manager."
+        action={canManage ? <Button size="sm" variant="secondary" onClick={() => setAdding((v) => !v)}><Plus size={14} /> Add contact</Button> : null}
+      />
+      {adding ? (
+        <form
+          className="grid gap-3 border-b border-line bg-page/50 px-5 py-4 sm:grid-cols-5"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setError(null);
+            try {
+              await saveCourierContact({ ...f, active: true });
+              setAdding(false);
+              setF({ courierCode: "", name: "", role: "ACCOUNT_MANAGER", phone: "" });
+              void load();
+            } catch (err) {
+              setError((err as Error).message);
+            }
+          }}
+        >
+          <select className={inputClass} value={f.courierCode} onChange={(e) => setF({ ...f, courierCode: e.target.value })} aria-label="Courier">
+            <option value="">Courier</option>
+            {couriers.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <input className={inputClass} placeholder="Name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          <select className={inputClass} value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })} aria-label="Role">
+            {Object.entries(CONTACT_ROLE).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+          <input className={inputClass} placeholder="Mobile" inputMode="numeric" maxLength={10} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, "") })} />
+          <Button type="submit" disabled={!f.courierCode || f.name.trim().length < 2 || !/^[6-9]\d{9}$/.test(f.phone)}>
+            Save
+          </Button>
+          {error ? <p className="text-[13px] font-medium text-flag-red sm:col-span-5">{error}</p> : null}
+        </form>
+      ) : null}
+      <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-4">
+        {grouped.map(([code, list]) => (
+          <div key={code} className="bg-white px-5 py-3 text-[13px]">
+            <p className="font-semibold text-ink">{name(code)}</p>
+            <ul className="mt-1 space-y-1">
+              {list.map((c) => (
+                <li key={c.id} className={clsx("flex justify-between gap-2", !c.active && "opacity-50")}>
+                  <span className="truncate text-ink-2">
+                    {c.name} <span className="text-xs text-muted">· {CONTACT_ROLE[c.role]}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-muted">{c.phone}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }

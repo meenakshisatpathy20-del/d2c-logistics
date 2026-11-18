@@ -97,8 +97,8 @@ export class PickupsService {
           }),
           // Any open pickup red flag for this vendor is solved once parcels leave.
           this.prisma.redFlag.updateMany({
-            where: { brandId, resolvedAt: null, type: { in: ['PICKUP_MISSED', 'PICKUP_UNCONFIRMED'] }, pickup: { warehouseId: p.warehouseId } },
-            data: { resolvedAt: at },
+            where: { brandId, resolvedAt: null, type: { in: ['PICKUP_MISSED', 'PICKUP_UNCONFIRMED', 'PICKUP_CLAIM', 'PICKUP_PENDING'] }, pickup: { warehouseId: p.warehouseId } },
+            data: { resolvedAt: at, outcome: 'Picked up', waitingOn: null },
           }),
         ]);
         await this.checkWeights(brandId, p, now);
@@ -149,6 +149,28 @@ export class PickupsService {
     const landed = to ? (await this.prisma.pickup.findUniqueOrThrow({ where: { id: to.id } })).slotStart : next.slotStart;
     const when = `${landed.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' })}, ${slotLabel(landed)}`;
     return { ok: true, movedTo: when, pickupId: to?.id ?? null, warehouse: { name: p.warehouse.name, contactPhone: p.warehouse.contactPhone }, courier: p.courier.name, slot: slotLabel(p.slotStart) };
+  }
+
+  /**
+   * From inside an issue: move every parcel of a pickup to the most reliable
+   * other courier (the old booking is cancelled), at the earliest slot it can
+   * still confirm.
+   */
+  async switchCourier(pickupId: string, reason: string, actor: { id: string; name: string }, now: Date = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+    const p = await this.prisma.pickup.findFirst({ where: { id: pickupId, brandId }, include: { courier: true, warehouse: true } });
+    if (!p) throw new NotFoundException('Pickup not found');
+    if (!['SCHEDULED', 'CONFIRMED', 'MISSED'].includes(p.status)) throw new BadRequestException('These parcels already left or moved');
+    let slot = { slotStart: p.slotStart, slotEnd: p.slotEnd };
+    while (slot.slotStart.getTime() - now.getTime() < CONFIRM_LEAD_HOURS * HOUR) slot = slotAfter(slot.slotStart);
+    const to = await this.moveParcels(p.id, slot, true, now);
+    if (!to) throw new BadRequestException('No other courier delivers these parcels');
+    await this.prisma.pickup.update({ where: { id: p.id }, data: { status: 'REASSIGNED', movedToId: to.id } });
+    await this.prisma.auditLog.create({
+      data: { brandId, actorId: actor.id || null, action: 'PICKUP_COURIER_SWITCHED', entityType: 'Pickup', entityId: p.id, after: { reason, to: to.courierName } },
+    });
+    const landed = (await this.prisma.pickup.findUniqueOrThrow({ where: { id: to.id } })).slotStart;
+    return { from: p.courier.name, to: to.courierName, slot: `${landed.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' })}, ${slotLabel(landed)}` };
   }
 
   /** Every pickup from today for the next 7 days, grouped by day: the Pickups screen and the vendor view. */

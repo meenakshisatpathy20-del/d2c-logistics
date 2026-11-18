@@ -465,3 +465,96 @@ export const photoUrl = (id: string) => `${API_URL}/api/photos/${id}`;
 
 export const getWeightHint = (product: string) =>
   request<{ product: string; samples: number; typicalGrams: number | null }>(`/api/weight-hint?product=${encodeURIComponent(product)}`);
+
+// ---------- Issues ----------
+
+export type Party = "OURS" | "COURIER" | "VENDOR" | "CUSTOMER";
+export type IssueGroup = "PICKUPS" | "TRANSIT" | "DELIVERY" | "RETURNS" | "WEIGHT" | "MONEY" | "BOOKING" | "OTHER";
+export type IssueRow = {
+  id: string;
+  type: string;
+  group: IssueGroup;
+  title: string;
+  message: string;
+  severity: "critical" | "warning";
+  about: { kind: "order" | "pickup"; id: string; label: string; sub: string } | null;
+  waitingOn: Party;
+  waitingOnLabel: string;
+  waitingPerson: string;
+  waitedMinutes: number;
+  reminders: number;
+  promiseAt: string | null;
+  promiseText: string | null;
+  promisesBroken: number;
+  owner: { id: string; name: string } | null;
+  dueAt: string | null;
+  overdue: boolean;
+  escalationLevel: number;
+  openedAt: string;
+  resolvedAt: string | null;
+  outcome: string | null;
+  faultParty: string | null;
+};
+export type IssuesPage = {
+  total: number;
+  page: number;
+  pages: number;
+  counts: { groups: Partial<Record<IssueGroup, number>>; waiting: Partial<Record<Party, number>> };
+  rows: IssueRow[];
+};
+export type IssueEventView = { id: string; kind: string; by: string; party: string; body: string; via: string | null; promiseAt: string | null; at: string };
+export type IssueDetail = IssueRow & {
+  open: boolean;
+  action: string | null;
+  outcomes: string[];
+  people: { party: string; name: string; role: string; company: string; phone: string | null; lastActive: string | null }[];
+  courierContacts: { id: string; name: string; role: string; phone: string }[];
+  team: { id: string; name: string; role: string }[];
+  shipment: { id: string; orderId: string; orderNumber: string; status: string; courier: string; awb: string; city: string } | null;
+  pickup: { id: string; warehouse: string; courier: string; slotStart: string; status: string; canPostpone: boolean; canSwitch: boolean; manifestUrl: string } | null;
+  events: IssueEventView[];
+};
+export type IssueQuery = { status?: "open" | "closed"; group?: IssueGroup | "ALL"; waiting?: Party | "ALL"; mine?: boolean; page?: number };
+export const getIssues = (q: IssueQuery = {}) => {
+  const p = new URLSearchParams();
+  if (q.status) p.set("status", q.status);
+  if (q.group && q.group !== "ALL") p.set("group", q.group);
+  if (q.waiting && q.waiting !== "ALL") p.set("waiting", q.waiting);
+  if (q.mine) p.set("mine", "1");
+  if (q.page) p.set("page", String(q.page));
+  return request<IssuesPage>(`/api/issues?${p}`);
+};
+export const getIssue = (id: string) => request<IssueDetail>(`/api/issues/${id}`);
+export type IssueAction =
+  | { kind: "message"; body: string }
+  | { kind: "ask"; party: Exclude<Party, "OURS">; body: string }
+  | { kind: "partner_reply"; party: Exclude<Party, "OURS">; via: "WHATSAPP" | "CALL" | "EMAIL"; body: string; promiseAt?: string }
+  | { kind: "call_note"; party: Exclude<Party, "OURS">; agreed: string; nextBy: Party; deadline?: string }
+  | { kind: "turn"; party: Party }
+  | { kind: "reassign"; ownerId: string }
+  | { kind: "postpone"; reason: string }
+  | { kind: "switch_courier"; reason: string }
+  | { kind: "resolve"; outcome: string; faultParty: string; note?: string };
+export const actOnIssue = (id: string, a: IssueAction) => request<IssueDetail>(`/api/issues/${id}/act`, { method: "POST", body: JSON.stringify(a) });
+export type IssueType = { key: string; label: string; group: IssueGroup; scope: "pickup" | "order" | "courier" };
+export const getIssueTypes = () => request<IssueType[]>("/api/issues/types");
+export const raiseIssue = (b: { type: string; body: string; title?: string; orderId?: string; pickupId?: string; courierCode?: string }) =>
+  request<IssueDetail>("/api/issues", { method: "POST", body: JSON.stringify(b) });
+
+export type VendorIssue = { id: string; title: string; about: string; yourTurn: boolean; waitedMinutes: number; recent: { by: string; body: string; at: string }[] };
+export const getVendorIssues = () => request<VendorIssue[]>("/api/vendor/issues");
+export const vendorReply = (id: string, b: { kind: "READY" | "NOT_READY" | "MESSAGE"; body?: string; promiseAt?: string }) =>
+  request<{ ok: boolean }>(`/api/vendor/issues/${id}/reply`, { method: "POST", body: JSON.stringify(b) });
+
+export type CourierContactRow = { id: string; courierCode: string; name: string; role: string; phone: string; email: string | null; region: string | null; active: boolean };
+export const getCourierContacts = () => request<CourierContactRow[]>("/api/settings/courier-contacts");
+export const saveCourierContact = (c: Omit<CourierContactRow, "id" | "email" | "region"> & { email?: string; region?: string }, id?: string) =>
+  request<CourierContactRow>(`/api/settings/courier-contacts${id ? `/${id}` : ""}`, { method: id ? "PATCH" : "POST", body: JSON.stringify(c) });
+
+/** "3 h 20 m", "2 d 4 h" */
+export function waited(minutes: number): string {
+  if (minutes < 60) return `${minutes} m`;
+  const h = Math.floor(minutes / 60);
+  if (h < 24) return `${h} h ${minutes % 60} m`;
+  return `${Math.floor(h / 24)} d ${h % 24} h`;
+}

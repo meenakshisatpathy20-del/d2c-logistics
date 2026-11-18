@@ -8,6 +8,7 @@ import { Badge, DemoBadge, type Tone } from "@/components/ui/primitives";
 import {
   API_URL,
   getMe,
+  getVendorIssues,
   getVendorToday,
   logout,
   markPacked,
@@ -15,6 +16,8 @@ import {
   postponePickup,
   type UpcomingPickup,
   uploadPackingPhoto,
+  type VendorIssue,
+  vendorReply,
   type VendorToday,
 } from "@/lib/api";
 import { formatINR } from "@/lib/format";
@@ -114,6 +117,8 @@ export default function VendorHome() {
                 ? `${parcels.filter((p) => p.packed).length} of ${parcels.length} parcels packed and ready`
                 : "New pickups show here as soon as orders are booked."}
             </p>
+
+            <VendorIssues />
 
             <div className="mt-5 space-y-6">
               {data.days.map((d) => (
@@ -354,5 +359,97 @@ function ParcelRow({ x, editable, onChanged }: { x: UpcomingPickup["parcels"][nu
       ) : null}
       {error ? <p className="mt-1.5 pl-10 text-[12.5px] font-medium text-flag-red">{error}</p> : null}
     </li>
+  );
+}
+
+/** Issues about this vendor's pickups: answer in one tap, on the record, instead of a WhatsApp group. */
+function VendorIssues() {
+  const [rows, setRows] = useState<VendorIssue[] | null>(null);
+  const load = useCallback(() => getVendorIssues().then(setRows, () => setRows([])), []);
+  useEffect(() => {
+    const t = setTimeout(load, 0);
+    const i = setInterval(load, 60_000);
+    return () => {
+      clearTimeout(t);
+      clearInterval(i);
+    };
+  }, [load]);
+  if (!rows || rows.length === 0) return null;
+  return (
+    <section className="mt-5">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-flag-red">Needs your answer</p>
+      <div className="space-y-3">
+        {rows.map((r) => (
+          <VendorIssueCard key={r.id} r={r} onDone={load} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function VendorIssueCard({ r, onDone }: { r: VendorIssue; onDone: () => void }) {
+  const [mode, setMode] = useState<null | "NOT_READY" | "MESSAGE">(null);
+  const [text, setText] = useState("");
+  const [time, setTime] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function send(kind: "READY" | "NOT_READY" | "MESSAGE") {
+    setBusy(true);
+    setError(null);
+    try {
+      await vendorReply(r.id, { kind, body: text || undefined, promiseAt: time ? new Date(time).toISOString() : undefined });
+      setMode(null);
+      setText("");
+      setTime("");
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const last = r.recent[0];
+  return (
+    <div className={clsx("rounded-2xl border bg-white p-4", r.yourTurn ? "border-flag-red/40" : "border-line")}>
+      <p className="text-[15px] font-semibold text-ink">{r.title}</p>
+      <p className="text-[13px] text-muted">{r.about}</p>
+      {last ? (
+        <p className="mt-2 rounded-lg bg-page px-3 py-2 text-[13px] text-ink-2">
+          <span className="font-medium">{last.by}:</span> {last.body}
+        </p>
+      ) : null}
+      {r.yourTurn ? (
+        <>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button disabled={busy} onClick={() => send("READY")} className="h-11 rounded-xl bg-brand-green text-[14px] font-semibold text-white disabled:opacity-60">
+              Open and ready
+            </button>
+            <button disabled={busy} onClick={() => setMode(mode === "NOT_READY" ? null : "NOT_READY")} className="h-11 rounded-xl border border-line text-[14px] font-medium text-ink-2">
+              Not ready yet
+            </button>
+          </div>
+          <button onClick={() => setMode(mode === "MESSAGE" ? null : "MESSAGE")} className="mt-2 w-full text-center text-[13px] font-medium text-brand-blue">
+            Write a message
+          </button>
+        </>
+      ) : (
+        <p className="mt-2 text-[12.5px] text-muted">Answered. D2C team is on it.</p>
+      )}
+      {mode ? (
+        <div className="mt-3 space-y-2">
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder={mode === "NOT_READY" ? "Why? e.g. stock arriving" : "Message"} className="h-11 w-full rounded-xl border border-line px-3 text-[15px]" />
+          {mode === "NOT_READY" ? (
+            <label className="block text-[13px] text-muted">
+              Ready by
+              <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-line px-3 text-[15px]" />
+            </label>
+          ) : null}
+          <button disabled={busy || (mode === "NOT_READY" ? !time : !text.trim())} onClick={() => send(mode)} className="h-11 w-full rounded-xl bg-navy text-[15px] font-semibold text-white disabled:opacity-50">
+            Send
+          </button>
+        </div>
+      ) : null}
+      {error ? <p className="mt-2 text-[13px] font-medium text-flag-red">{error}</p> : null}
+    </div>
   );
 }

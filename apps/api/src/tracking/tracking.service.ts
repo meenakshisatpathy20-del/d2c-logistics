@@ -86,7 +86,7 @@ export class TrackingService {
           },
         });
         // A new scan clears a "no scan" flag.
-        await this.resolve(s.id, ['NO_SCAN_48H'], now);
+        await this.resolve(s.id, ['NO_SCAN_48H'], now, status === 'DELIVERED' ? 'Delivered' : 'Moving again');
       }
 
       if (status === 'NDR') {
@@ -98,7 +98,7 @@ export class TrackingService {
           now,
         });
       } else {
-        await this.resolve(s.id, ['NDR'], now);
+        await this.resolve(s.id, ['NDR'], now, status === 'DELIVERED' ? 'Delivered' : status.startsWith('RTO') ? 'Returned to seller' : 'Reattempt under way');
       }
       if (status === 'RTO_INITIATED') {
         await this.raise(brandId, s.id, 'RTO', 'CRITICAL', 'SUPPORT', {
@@ -110,7 +110,7 @@ export class TrackingService {
         });
       }
       if (status === 'RTO_DELIVERED' || status === 'DELIVERED') {
-        await this.resolve(s.id, ['RTO', 'NDR', 'NO_SCAN_48H'], now);
+        await this.resolve(s.id, ['RTO', 'NDR', 'NO_SCAN_48H'], now, status === 'DELIVERED' ? 'Delivered' : 'Returned to seller');
       }
 
       const silentHours = (now.getTime() - lastScanAt.getTime()) / HOUR;
@@ -157,7 +157,8 @@ export class TrackingService {
     }
   }
 
-  private async resolve(shipmentId: string, types: string[], now: Date) {
-    await this.prisma.redFlag.updateMany({ where: { shipmentId, type: { in: types }, resolvedAt: null }, data: { resolvedAt: now } });
+  /** Closes a flag on the real outcome the courier's scans show. */
+  private async resolve(shipmentId: string, types: string[], now: Date, outcome: string) {
+    await this.prisma.redFlag.updateMany({ where: { shipmentId, type: { in: types }, resolvedAt: null }, data: { resolvedAt: now, outcome, waitingOn: null } });
   }
 }

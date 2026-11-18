@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { CalendarClock, Check, FileText, Loader2, PackageCheck } from "lucide-react";
+import { CalendarClock, Check, FileText, Flag, Loader2, PackageCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Timeline } from "@/app/(app)/today-view";
 import { useShell } from "@/components/shell/app-shell";
@@ -129,6 +129,9 @@ function PickupRow({ p, onChanged }: { p: UpcomingPickup; onChanged: () => void 
         <span className="flex gap-1.5">
           <a href={p.manifestUrl} target="_blank" rel="noreferrer" className="flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-[12.5px] font-medium text-ink-2 hover:bg-page">
             <FileText size={13} /> Manifest
+          </a>
+          <a href={`/issues?raise=1&pickup=${p.id}`} className="flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-[12.5px] font-medium text-ink-2 hover:bg-page">
+            <Flag size={13} /> Raise issue
           </a>
           {p.canPostpone && canShip ? (
             <button onClick={() => setOpen((v) => !v)} className="flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-[12.5px] font-medium text-ink-2 hover:bg-page">

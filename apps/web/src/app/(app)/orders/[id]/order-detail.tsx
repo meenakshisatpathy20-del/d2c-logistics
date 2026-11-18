@@ -145,6 +145,13 @@ export function OrderDetailView({ id }: { id: string }) {
               </Button>
             </a>
           ) : null}
+          {live ? (
+            <Link href={`/issues?raise=1&order=${encodeURIComponent(o.orderNumber)}`}>
+              <Button variant="secondary">
+                <Flag size={15} /> Raise issue
+              </Button>
+            </Link>
+          ) : null}
           {live?.pickup ? (
             <a href={live.pickup.manifestUrl} target="_blank" rel="noreferrer">
               <Button variant="secondary">
@@ -405,6 +412,9 @@ function FlagRow({ flag, onChanged }: { flag: OrderDetail["shipments"][number]["
         </p>
         {flag.escalationLevel ? <p className="mt-0.5 text-[12px] font-medium text-flag-red">⬆ {ESCALATED[flag.escalationLevel]}</p> : null}
         {acted ? <p className="mt-0.5 text-[12.5px] font-medium text-[#0e6e05]">✓ {flag.note}</p> : null}
+        <Link href={`/issues/${flag.id}`} className="mt-1 inline-block text-[12.5px] font-medium text-brand-blue hover:underline">
+          Open the issue room →
+        </Link>
         {error ? <p className="mt-0.5 text-xs text-flag-red">{error}</p> : null}
       </div>
       <div className="flex gap-2">

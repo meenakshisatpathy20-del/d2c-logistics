@@ -61,6 +61,28 @@ async function main() {
     });
   }
 
+  // Named people at each courier (demo names until the real contacts are entered in Settings).
+  const DEMO_PEOPLE: Record<string, [string, string, string]> = {
+    DELHIVERY: ['Rohit S.', 'Manoj K.', 'Neha P.'],
+    EKART: ['Anjali R.', 'Sunil P.', 'Vikram T.'],
+    SHADOWFAX: ['Pooja M.', 'Imran S.', 'Karan B.'],
+    BLUEDART: ['Sneha J.', 'Deepak R.', 'Arun V.'],
+    XPRESSBEES: ['Haritha N.', 'Ravi N.', 'Suresh G.'],
+    AMAZON: ['Divya K.', 'Mahesh T.', 'Rahul D.'],
+    BLITZ: ['Nidhi A.', 'Arif K.', 'Gaurav L.'],
+    PIKNDEL: ['Meera S.', 'Vikas M.', 'Ajay C.'],
+  };
+  if ((await prisma.courierContact.count({ where: { brandId: brand.id } })) === 0) {
+    let i = 0;
+    for (const [code, [am, lead, rm]] of Object.entries(DEMO_PEOPLE)) {
+      for (const [name, role] of [[am, 'ACCOUNT_MANAGER'], [lead, 'PICKUP_LEAD'], [rm, 'REGIONAL_MANAGER']] as const) {
+        await prisma.courierContact.create({
+          data: { brandId: brand.id, courierCode: code, name: `${name} (demo)`, role, phone: `97000${String(10000 + i++).padStart(5, '0')}`, region: 'All India' },
+        });
+      }
+    }
+  }
+
   // One vendor login per pickup warehouse: mobile number + one-time code, own warehouse only.
   for (const w of await prisma.warehouse.findMany({ where: { brandId: brand.id } })) {
     await prisma.user.upsert({

@@ -96,7 +96,7 @@ describe('Day 7-8: roles, alerts, escalation, summary, vendor view (e2e)', () =>
     const sent = await prisma.notification.findMany({ where: { dedupeKey: { startsWith: `flag:${flag.id}:` } } });
     expect(sent.map((n) => n.channel).sort()).toEqual(['APP', 'WHATSAPP']);
     expect(sent.find((n) => n.channel === 'WHATSAPP')?.status).toBe('DEMO');
-    expect(sent[0].link).toBe(`/orders/${s.orderId}`);
+    expect(sent[0].link).toBe(`/issues/${flag.id}`);
 
     const opsAgent = await teamAgent(app, 'ops@d2c.demo');
     const bell = await opsAgent.get('/api/notifications/mine').expect(200);

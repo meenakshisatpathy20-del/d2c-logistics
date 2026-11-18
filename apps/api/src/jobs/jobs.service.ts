@@ -1,6 +1,7 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { AlertsService } from '../alerts/alerts.service.js';
+import { IssuesService } from '../issues/issues.service.js';
 import { PickupsService } from '../pickups/pickups.service.js';
 import { TrackingService } from '../tracking/tracking.service.js';
 
@@ -17,6 +18,7 @@ export class JobsService implements OnApplicationBootstrap {
     private readonly pickups: PickupsService,
     private readonly tracking: TrackingService,
     private readonly alerts: AlertsService,
+    private readonly issues: IssuesService,
   ) {}
 
   /**
@@ -44,7 +46,9 @@ export class JobsService implements OnApplicationBootstrap {
     const pickups = await this.pickups.run(now);
     const tracking = await this.tracking.sync(now);
     // After the rules: alert owners of new problems, escalate overdue ones, daily messages.
+    // New red flags become issue rooms first, so their owners are alerted with the room's link.
+    const issues = await this.issues.run(now);
     const alerts = await this.alerts.run(now);
-    return { pickups, tracking, alerts };
+    return { pickups, tracking, issues, alerts };
   }
 }
