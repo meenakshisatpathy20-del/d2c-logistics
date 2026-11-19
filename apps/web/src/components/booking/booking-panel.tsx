@@ -152,15 +152,18 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const [slots] = useState(() => slotOptions(new Date()));
-  const [slot, setSlot] = useState(() => slots[0].key);
+  const wh = warehouses.find((w) => w.code === warehouse)!;
+  // Slots follow the chosen warehouse's working hours, so a closed slot is never offered.
+  const slots = useMemo(() => slotOptions(new Date(), wh), [wh]);
+  const [pickedSlot, setSlot] = useState<string | null>(null);
+  const slot = pickedSlot && slots.some((x) => x.key === pickedSlot) ? pickedSlot : slots[0].key;
   const [booking, setBooking] = useState(false);
   const [bookError, setBookError] = useState<string | null>(null);
   const [booked, setBooked] = useState<BookedShipment | null>(null);
   // One key per form: a double-click or retry returns the same booking, never a second one.
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
-  const origin = warehouses.find((w) => w.code === warehouse)!.pincode;
+  const origin = wh.pincode;
   const box = { l: Number(dims.l), b: Number(dims.b), h: Number(dims.h) };
   const value = Number(orderValue);
   const advance = payment === "COD" && advancePaid ? codAdvanceFor(value) : 0;
@@ -265,8 +268,9 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
         lengthCm: box.l,
         breadthCm: box.b,
         heightCm: box.h,
-        courierCode: chosenQuote.courierCode,
-        slot: { day: chosenSlot.day, startHour: chosenSlot.start },
+        // The recommended courier is not a hand pick: if its booking fails, the next one is used.
+        courierCode: chosenQuote.recommended ? undefined : chosenQuote.courierCode,
+        slot: chosenSlot.day === "auto" ? undefined : { day: chosenSlot.day, startHour: chosenSlot.start },
         idempotencyKey,
       });
       setBooked(result);
@@ -309,8 +313,17 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
         </motion.span>
         <h3 className="mt-4 font-display text-2xl font-bold text-navy">Booked with {booked.courierName}</h3>
         <p className="mt-1 text-sm text-muted">
-          Order #{booked.orderNumber} for {customer} · pickup {chosenSlot.dayLabel === "Today" || chosenSlot.dayLabel === "Tomorrow" ? chosenSlot.dayLabel.toLowerCase() : chosenSlot.dayLabel}, {booked.pickupSlot?.label ?? chosenSlot.label}
+          Order #{booked.orderNumber} for {customer} · pickup{" "}
+          {booked.pickupSlot
+            ? `${new Date(booked.pickupSlot.start).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short" })}, ${booked.pickupSlot.label}`
+            : `${chosenSlot.dayLabel}, ${chosenSlot.label}`}
         </p>
+        {booked.failedOver?.length ? (
+          <p className="mt-3 max-w-sm rounded-lg bg-brand-amber-soft px-3 py-2 text-[12.5px] text-[#b54708]">
+            {booked.failedOver.map((f) => f.courierName).join(", ")} failed ({booked.failedOver[0].reason}), so it went to {booked.courierName}. An issue is open with{" "}
+            {booked.failedOver.length > 1 ? "those couriers" : booked.failedOver[0].courierName}.
+          </p>
+        ) : null}
         <dl className="mt-6 grid w-full max-w-sm grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line text-left">
           {[
             ["AWB", booked.awb],
@@ -542,6 +555,7 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
                           ) : null}
                           {q === cheapest && !q.recommended ? <Badge tone="grey">Cheapest</Badge> : null}
                           {q.serviceable && q.etaDays === fastest && !q.recommended ? <Badge tone="blue">Fastest</Badge> : null}
+                          {q.failingNow ? <Badge tone="red">Bookings failing</Badge> : null}
                         </span>
                         <span className="text-xs text-muted">
                           {q.serviceable ? (
@@ -551,6 +565,8 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
                                 {q.pickupOnTimePct}%
                               </span>
                             </>
+                          ) : q.switchedOff ? (
+                            "Switched off by our team"
                           ) : (
                             "Doesn't deliver here"
                           )}
@@ -585,6 +601,7 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
               </button>
             ))}
           </div>
+          <p className="mt-2 text-xs text-muted">{wh.name} is open {wh.hours}.</p>
           {slots[0].day === "next" ? (
             <p className="mt-2 text-xs text-muted">
               {slots[0].dayLabel === "Tomorrow"

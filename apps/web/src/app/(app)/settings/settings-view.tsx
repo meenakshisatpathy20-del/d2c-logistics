@@ -14,6 +14,8 @@ import {
   changePassword,
   type CourierInfo,
   getCouriers,
+  getCourierHealth,
+  simulateCourierFailure,
   getTeam,
   getWarehousesFull,
   resetPassword,
@@ -26,6 +28,7 @@ import {
 
 const ROLE: Record<string, string> = { ADMIN: "Admin", OPS: "Operations", SUPPORT: "Support", FINANCE: "Finance", WAREHOUSE: "Warehouse", VENDOR: "Vendor", COURIER: "Courier" };
 const STRONG = (p: string) => p.length >= 8 && /[A-Za-z]/.test(p) && /\d/.test(p);
+const fmtWhen = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
 /** Team, pickup warehouses (with vendor sign-in) and couriers: kept by our own admins and ops. */
@@ -40,7 +43,7 @@ export function SettingsView() {
   const load = useCallback(() => {
     getTeam().then(setTeam, () => {});
     getWarehousesFull().then(setWarehouses, () => {});
-    getCouriers().then(setCouriers, () => {});
+    getCourierHealth().catch(() => getCouriers()).then(setCouriers, () => {});
   }, []);
   useEffect(() => {
     const t = setTimeout(load, 0);
@@ -292,7 +295,9 @@ function ChangePassword() {
 
 // ---------- Warehouses and vendor contacts ----------
 
-const EMPTY_WH = { code: "", name: "", address: "", city: "", state: "", pincode: "", cluster: "", contactName: "", contactPhone: "" };
+const EMPTY_WH = { code: "", name: "", address: "", city: "", state: "", pincode: "", cluster: "", contactName: "", contactPhone: "", opensAt: 10, closesAt: 19, saturdayClosesAt: 16 as number | null };
+const HOURS = Array.from({ length: 18 }, (_, i) => i + 6);
+const hourText = (h: number) => (h === 12 ? "12 pm" : h > 12 ? `${h - 12} pm` : `${h} am`);
 
 function WarehousesCard({ warehouses, canManage, onChanged }: { warehouses: WarehouseFull[] | null; canManage: boolean; onChanged: () => void }) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -316,6 +321,7 @@ function WarehousesCard({ warehouses, canManage, onChanged }: { warehouses: Ware
                   {w.address}, {w.city} {w.pincode}
                   {w.cluster ? ` · ${w.cluster}` : ""}
                 </span>
+                <span className="block text-xs text-ink-2">Open {w.hours}</span>
               </span>
               <span className="flex shrink-0 flex-wrap items-center gap-2">
                 {w.placeholder ? (
@@ -361,7 +367,7 @@ function WarehouseForm({ existing, onDone }: { existing?: WarehouseFull; onDone:
         setBusy(true);
         setError(null);
         try {
-          const body = { name: f.name, address: f.address, city: f.city, state: f.state, pincode: f.pincode, cluster: f.cluster || undefined, contactName: f.contactName, contactPhone: f.contactPhone };
+          const body = { name: f.name, address: f.address, city: f.city, state: f.state, pincode: f.pincode, cluster: f.cluster || undefined, contactName: f.contactName, contactPhone: f.contactPhone, opensAt: f.opensAt, closesAt: f.closesAt, saturdayClosesAt: f.saturdayClosesAt };
           if (existing) await updateWarehouse(existing.code, body);
           else await addWarehouse({ ...body, code: f.code.toUpperCase() });
           onDone();
@@ -402,7 +408,26 @@ function WarehouseForm({ existing, onDone }: { existing?: WarehouseFull; onDone:
       <Field label="Contact mobile" hint="Becomes the vendor's sign-in">
         <input className={inputClass} inputMode="numeric" maxLength={10} value={f.contactPhone} onChange={(e) => setF({ ...f, contactPhone: e.target.value.replace(/\D/g, "") })} />
       </Field>
-      <div className="flex items-end justify-end gap-2">
+      <div className="grid grid-cols-3 gap-2 sm:col-span-2">
+        <Field label="Opens">
+          <select className={inputClass} value={f.opensAt} onChange={(e) => setF({ ...f, opensAt: Number(e.target.value) })}>
+            {HOURS.filter((h) => h <= 20).map((h) => <option key={h} value={h}>{hourText(h)}</option>)}
+          </select>
+        </Field>
+        <Field label="Closes">
+          <select className={inputClass} value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: Number(e.target.value) })}>
+            {HOURS.filter((h) => h >= 8).map((h) => <option key={h} value={h}>{hourText(h)}</option>)}
+          </select>
+        </Field>
+        <Field label="Saturday">
+          <select className={inputClass} value={f.saturdayClosesAt ?? "closed"} onChange={(e) => setF({ ...f, saturdayClosesAt: e.target.value === "closed" ? null : Number(e.target.value) })}>
+            <option value="closed">Closed</option>
+            {HOURS.filter((h) => h >= 8).map((h) => <option key={h} value={h}>Till {hourText(h)}</option>)}
+          </select>
+        </Field>
+      </div>
+      <p className="self-end text-xs text-muted">Pickups are booked only inside these hours. A &ldquo;warehouse closed&rdquo; claim is checked against them.</p>
+      <div className="flex items-end justify-end gap-2 sm:col-span-3">
         <Button type="button" variant="secondary" onClick={onDone}>
           <X size={14} />
         </Button>
@@ -448,6 +473,7 @@ function CouriersCard({ couriers, canManage, onChanged }: { couriers: CourierInf
               <span className="font-medium text-ink">{c.name}</span>
               {!c.active ? <Badge tone="red">Switched off</Badge> : c.mode === "DEMO" ? <DemoBadge /> : <Badge tone="green">Live</Badge>}
             </div>
+            <ConnectionLine c={c} canTest={canManage} onChanged={onChanged} />
             <div className="mt-1 flex items-center justify-between text-xs text-muted">
               <span>Pickups on time {c.pickupOnTimePct}%</span>
               {canManage ? (
@@ -485,7 +511,61 @@ function CouriersCard({ couriers, canManage, onChanged }: { couriers: CourierInf
           </div>
         ))}
       </div>
+      {canManage && couriers?.some((c) => c.mode === "DEMO") ? <TestFailure couriers={couriers} onChanged={onChanged} /> : null}
     </Card>
+  );
+}
+
+/** Demo only: make one courier's bookings fail, to see failover and the issue it opens. */
+function TestFailure({ couriers, onChanged }: { couriers: CourierInfo[]; onChanged: () => void }) {
+  const [code, setCode] = useState("");
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3 text-xs text-muted">
+      Demo: make a courier&apos;s bookings fail, to see orders move to the next courier.
+      <select value={code} onChange={(e) => setCode(e.target.value)} className="h-7 rounded-md border border-line bg-white px-1.5 text-xs text-ink-2" aria-label="Courier to fail">
+        <option value="">Pick courier</option>
+        {couriers.filter((c) => c.active && !c.simulated).map((c) => (
+          <option key={c.code} value={c.code}>{c.name}</option>
+        ))}
+      </select>
+      <button
+        disabled={!code}
+        onClick={async () => {
+          await simulateCourierFailure(code, "Courier authentication failed");
+          setCode("");
+          onChanged();
+        }}
+        className="font-medium text-ink-2 underline-offset-2 hover:underline disabled:opacity-40"
+      >
+        Start
+      </button>
+    </div>
+  );
+}
+
+/** Is booking through this courier working right now? A failure names the error and how often. */
+function ConnectionLine({ c, canTest, onChanged }: { c: CourierInfo; canTest: boolean; onChanged: () => void }) {
+  if (!c.health || c.health === "off") return null;
+  const failing = c.health === "failing";
+  return (
+    <div className="mt-1.5 text-xs">
+      <span className={clsx("flex items-center gap-1.5", failing ? "font-medium text-flag-red" : "text-ink-2")}>
+        <span className={clsx("size-1.5 rounded-full", failing ? "bg-flag-red" : "bg-[#0e6e05]")} />
+        {failing ? `Bookings failing: ${c.lastError}` : c.lastBookedAt ? `Bookings working · ${fmtWhen(c.lastBookedAt)}` : "Bookings working"}
+      </span>
+      {failing && (c.failures24h ?? 0) > 1 ? <span className="ml-3 text-muted">{c.failures24h} failures in 24 h · orders go to the next courier</span> : null}
+      {canTest && c.simulated ? (
+        <button
+          onClick={async () => {
+            await simulateCourierFailure(c.code, c.simulated ? null : "Courier authentication failed");
+            onChanged();
+          }}
+          className="ml-3 text-muted underline-offset-2 hover:underline"
+        >
+          End test failure
+        </button>
+      ) : null}
+    </div>
   );
 }
 

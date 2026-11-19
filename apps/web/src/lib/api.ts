@@ -15,6 +15,7 @@ export type RateQuote = {
   pickupOnTimePct: number;
   recommended: boolean;
   switchedOff?: boolean;
+  failingNow?: boolean;
 };
 
 export type RateRequest = {
@@ -67,7 +68,7 @@ export const announceShipmentsChanged = () => window.dispatchEvent(new Event(SHI
 
 // ---------- Warehouses ----------
 
-export type Warehouse = { code: string; name: string; city: string; pincode: string; cluster: string | null };
+export type Warehouse = { code: string; name: string; city: string; pincode: string; cluster: string | null; opensAt: number; closesAt: number; saturdayClosesAt: number | null; hours: string };
 export const getWarehouses = () => request<Warehouse[]>("/api/warehouses");
 
 // ---------- Booking ----------
@@ -108,6 +109,8 @@ export type BookedShipment = {
   expectedDelivery: string;
   pickupSlot: { start: string; end: string; label: string } | null;
   labelUrl: string;
+  /** Couriers tried first whose booking failed; the order went to the next one. */
+  failedOver?: { courierCode: string; courierName: string; reason: string }[];
 };
 
 export const bookOrder = (input: BookOrderInput & { idempotencyKey: string }) =>
@@ -319,6 +322,8 @@ export type OrderDetail = {
     flags: { id: string; type: string; title: string; message: string; owner: string | null; action: string | null; note: string | null; escalationLevel: number; open: boolean; createdAt: string }[];
   }[];
   messages: { from: string; name: string | null; body: string; channel: string; at: string }[];
+  /** Open problems about the order itself (e.g. not booked in 24 hours). */
+  orderFlags?: OrderDetail["shipments"][number]["flags"];
   history: { action: string; by: string; at: string; after: unknown }[];
 };
 export const getOrder = (id: string) => request<OrderDetail>(`/api/orders/${encodeURIComponent(id)}`);
@@ -339,7 +344,23 @@ export const actOnFlag = (id: string, action: FlagAction) =>
 export type TeamMember = { id: string; name: string; role: string; email: string | null; phone: string; active: boolean; managerId: string | null; lastLoginAt: string | null };
 export const getTeam = () => request<TeamMember[]>("/api/team");
 
-export type CourierInfo = { code: string; name: string; mode: "DEMO" | "LIVE"; active: boolean; pickupOnTimePct?: number };
+export type CourierInfo = {
+  code: string;
+  name: string;
+  mode: "DEMO" | "LIVE";
+  active: boolean;
+  pickupOnTimePct?: number;
+  // Connection health (Settings): only for team roles that may see it.
+  health?: "ok" | "failing" | "off";
+  lastBookedAt?: string | null;
+  lastFailedAt?: string | null;
+  lastError?: string | null;
+  failures24h?: number;
+  simulated?: string | null;
+};
+export const getCourierHealth = () => request<CourierInfo[]>("/api/couriers/health");
+export const simulateCourierFailure = (code: string, message: string | null) =>
+  request<CourierInfo>(`/api/couriers/${code}/simulate-failure`, { method: "POST", body: JSON.stringify({ message }) });
 export const setCourierActive = (code: string, active: boolean, reason?: string) =>
   request<CourierInfo>(`/api/couriers/${code}`, { method: "PATCH", body: JSON.stringify({ active, reason }) });
 
@@ -360,13 +381,17 @@ export type WarehouseFull = {
   cluster: string | null;
   contactName: string;
   contactPhone: string;
+  opensAt: number;
+  closesAt: number;
+  saturdayClosesAt: number | null;
+  hours: string;
   placeholder: boolean;
   vendorLogin: { active: boolean; lastLoginAt: string | null } | null;
 };
 export const getWarehousesFull = () => request<WarehouseFull[]>("/api/settings/warehouses");
-export const addWarehouse = (w: Omit<WarehouseFull, "placeholder" | "vendorLogin" | "cluster"> & { cluster?: string }) =>
+export const addWarehouse = (w: Omit<WarehouseFull, "placeholder" | "vendorLogin" | "cluster" | "hours"> & { cluster?: string }) =>
   request<WarehouseFull>("/api/settings/warehouses", { method: "POST", body: JSON.stringify(w) });
-export const updateWarehouse = (code: string, patch: Partial<Omit<WarehouseFull, "code" | "placeholder" | "vendorLogin">>) =>
+export const updateWarehouse = (code: string, patch: Partial<Omit<WarehouseFull, "code" | "placeholder" | "vendorLogin" | "hours">>) =>
   request<WarehouseFull>(`/api/settings/warehouses/${code}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const getCouriers = () => request<CourierInfo[]>("/api/couriers");
 
@@ -477,7 +502,7 @@ export type IssueRow = {
   title: string;
   message: string;
   severity: "critical" | "warning";
-  about: { kind: "order" | "pickup"; id: string; label: string; sub: string } | null;
+  about: { kind: "order" | "pickup" | "courier"; id: string; label: string; sub: string } | null;
   waitingOn: Party;
   waitingOnLabel: string;
   waitingPerson: string;
@@ -494,6 +519,8 @@ export type IssueRow = {
   resolvedAt: string | null;
   outcome: string | null;
   faultParty: string | null;
+  /** What the delay is costing: order value held up, COD not collected, days past the promised date. */
+  cost: { parcels: number; value: number; cod: number; daysLate: number } | null;
 };
 export type IssuesPage = {
   total: number;
@@ -511,7 +538,8 @@ export type IssueDetail = IssueRow & {
   courierContacts: { id: string; name: string; role: string; phone: string }[];
   team: { id: string; name: string; role: string }[];
   shipment: { id: string; orderId: string; orderNumber: string; status: string; courier: string; awb: string; city: string } | null;
-  pickup: { id: string; warehouse: string; courier: string; slotStart: string; status: string; canPostpone: boolean; canSwitch: boolean; manifestUrl: string } | null;
+  pickup: { id: string; warehouse: string; courier: string; slotStart: string; status: string; canPostpone: boolean; canSwitch: boolean; manifestUrl: string; hours: string; slotInHours: boolean } | null;
+  order: { id: string; orderNumber: string; status: string } | null;
   events: IssueEventView[];
 };
 export type IssueQuery = { status?: "open" | "closed"; group?: IssueGroup | "ALL"; waiting?: Party | "ALL"; mine?: boolean; page?: number };
@@ -525,6 +553,11 @@ export const getIssues = (q: IssueQuery = {}) => {
   return request<IssuesPage>(`/api/issues?${p}`);
 };
 export const getIssue = (id: string) => request<IssueDetail>(`/api/issues/${id}`);
+export type DelayCost = {
+  total: { value: number; cod: number; parcels: number };
+  rows: { code: string; courier: string; issues: number; parcels: number; value: number; cod: number; maxDaysLate: number; waitingOnThem: number; remindersIgnored: number; promisesBroken: number }[];
+};
+export const getDelayCost = () => request<DelayCost>("/api/issues/delay-cost");
 export type IssueAction =
   | { kind: "message"; body: string }
   | { kind: "ask"; party: Exclude<Party, "OURS">; body: string }

@@ -100,3 +100,43 @@ export function slotLabel(slotStart: Date): string {
   const fmt = (x: number) => (x === 12 ? '12 pm' : x > 12 ? `${x - 12} pm` : `${x} am`);
   return `${fmt(h)}–${fmt(h + SLOT_HOURS)}`;
 }
+
+/** A warehouse's declared working hours (IST, whole hours). Saturday null = closed on Saturday. */
+export type WorkingHours = { opensAt: number; closesAt: number; saturdayClosesAt: number | null };
+
+export function isSaturday(at: Date): boolean {
+  return new Date(at.getTime() + IST_OFFSET_MS).getUTCDay() === 6;
+}
+
+/** The hour the warehouse closes on this IST day, or null if it is closed all day. */
+export function closesOn(at: Date, h: WorkingHours): number | null {
+  if (closedReason(at)) return null;
+  return isSaturday(at) ? h.saturdayClosesAt : h.closesAt;
+}
+
+/** True when the whole pickup slot falls inside the warehouse's open hours that day. */
+export function slotFits(slotStart: Date, h: WorkingHours | null | undefined): boolean {
+  if (!h) return true;
+  const close = closesOn(slotStart, h);
+  if (close === null) return false;
+  const start = istHour(slotStart);
+  return start >= h.opensAt && start + SLOT_HOURS <= close;
+}
+
+/** True when the warehouse was open at this moment (for checking a "warehouse closed" claim). */
+export function wasOpenAt(at: Date, h: WorkingHours): boolean {
+  const close = closesOn(at, h);
+  if (close === null) return false;
+  const hour = istHour(at);
+  return hour >= h.opensAt && hour < close;
+}
+
+export function hourLabel(x: number): string {
+  return x === 12 ? '12 pm' : x === 0 || x === 24 ? '12 am' : x > 12 ? `${x - 12} pm` : `${x} am`;
+}
+
+/** "10 am–7 pm, Sat till 4 pm" */
+export function hoursLabel(h: WorkingHours): string {
+  const sat = h.saturdayClosesAt === null ? 'closed Saturday' : h.saturdayClosesAt === h.closesAt ? 'Saturday too' : `Sat till ${hourLabel(h.saturdayClosesAt)}`;
+  return `${hourLabel(h.opensAt)}–${hourLabel(h.closesAt)}, ${sat}`;
+}

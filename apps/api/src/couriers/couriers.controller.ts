@@ -27,6 +27,22 @@ export class CouriersController {
     return this.couriers.list().find((c) => c.code === code.toUpperCase());
   }
 
+  /** Each courier's booking connection: working, failing (with the error), or switched off. */
+  @Roles('ADMIN', 'OPS', 'FINANCE')
+  @Get('health')
+  health() {
+    return this.couriers.health();
+  }
+
+  /** Demo only: make a courier's bookings fail, to see failover and the issue it raises. */
+  @Roles('ADMIN')
+  @Post(':code/simulate-failure')
+  async simulate(@Param('code') code: string, @Body() body: { message?: unknown }) {
+    const message = typeof body?.message === 'string' && body.message.trim() ? body.message.trim().slice(0, 200) : null;
+    await this.couriers.simulateFailure(code.toUpperCase(), message);
+    return (await this.couriers.health()).find((c) => c.code === code.toUpperCase());
+  }
+
   @Get()
   list() {
     return this.couriers.list();

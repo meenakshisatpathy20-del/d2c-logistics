@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { BrandService } from '../common/brand.service.js';
-import { closedReason, istDayStart, nextBookableSlot, slotLabel, slotWindow } from '../common/ist.js';
-import { CouriersService } from '../couriers/couriers.service.js';
+import { closedReason, hoursLabel, istDayStart, nextBookableSlot, slotFits, slotLabel, slotWindow } from '../common/ist.js';
+import { BookingError, CouriersService, RELIABLE_PICKUP_PCT } from '../couriers/couriers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { BookOrder, BulkBook } from './booking.schema.js';
 import { initials, laneFor } from './lanes.js';
@@ -69,19 +69,16 @@ export class ShipmentsService {
     if (quote.switchedOff) throw new BadRequestException(`${quote.courierName} is switched off by our team right now. Pick another courier.`);
     if (!quote.serviceable) throw new BadRequestException(`${quote.courierName} does not deliver to pin code ${input.pincode}`);
 
-    let { slotStart, slotEnd } = input.slot ? slotWindow(now, input.slot.day, input.slot.startHour) : nextBookableSlot(now);
-    // A slot whose pickup already happened (or was missed) is closed to new parcels.
-    const open = await openSlot(this.prisma, warehouse.id, quote.courierCode, { slotStart, slotEnd }, !!input.slot);
-    if (!open) {
-      throw new BadRequestException(
-        input.slot ? `The ${slotLabel(slotStart)} pickup is already closed. Pick a later slot.` : 'No open pickup slot found for this courier. Contact operations.',
-      );
-    }
-    ({ slotStart, slotEnd } = open);
-    const closed = closedReason(slotStart);
-    if (closed) throw new BadRequestException(`Couriers do not pick up on that day (${closed}). Pick another slot.`);
-    if (slotStart.getTime() - now.getTime() < 2 * 60 * 60 * 1000) {
-      throw new BadRequestException('That pickup slot is too close for the courier to confirm. Pick a later slot.');
+    const requested = input.slot ? slotWindow(now, input.slot.day, input.slot.startHour) : nextBookableSlot(now);
+    if (input.slot) {
+      const closed = closedReason(requested.slotStart);
+      if (closed) throw new BadRequestException(`Couriers do not pick up on that day (${closed}). Pick another slot.`);
+      if (requested.slotStart.getTime() - now.getTime() < 2 * 60 * 60 * 1000) {
+        throw new BadRequestException('That pickup slot is too close for the courier to confirm. Pick a later slot.');
+      }
+      if (!slotFits(requested.slotStart, warehouse)) {
+        throw new BadRequestException(`${warehouse.name} is closed at ${slotLabel(requested.slotStart)} that day (open ${hoursLabel(warehouse)}). Pick another slot.`);
+      }
     }
 
     const pastReturns = await this.prisma.shipment.count({
@@ -89,8 +86,49 @@ export class ShipmentsService {
     });
     const risk = rtoRisk({ paymentMode: input.paymentMode, orderValue: input.orderValue, codAdvance: advance, pincode: input.pincode, addressLine: input.addressLine, pastReturns });
 
-    const adapter = this.couriers.get(quote.courierCode);
-    const booked = await adapter.book({ ...rateReq, orderNumber: input.orderNumber, idempotencyKey: input.idempotencyKey }, now);
+    // A courier whose connection fails is not a dead end: the next best courier is tried at
+    // once, and the failure becomes an issue naming the courier who must fix it.
+    // A courier picked by hand is not swapped silently; the error names the next best one.
+    const candidates = input.courierCode
+      ? [quote]
+      : [quote, ...quotes.filter((q) => q.serviceable && q !== quote).sort((a, b) => Number(b.pickupOnTimePct >= RELIABLE_PICKUP_PCT) - Number(a.pickupOnTimePct >= RELIABLE_PICKUP_PCT) || a.total - b.total)];
+    const failures: Array<{ courierCode: string; courierName: string; reason: string }> = [];
+    let chosen: { quote: (typeof quotes)[number]; booked: Awaited<ReturnType<CouriersService['bookWith']>>; slotStart: Date; slotEnd: Date } | null = null;
+    for (const q of candidates) {
+      // A slot whose pickup already happened (or was missed), or outside the warehouse's hours, is closed to new parcels.
+      const open = await openSlot(this.prisma, warehouse.id, q.courierCode, requested, !!input.slot);
+      if (!open) {
+        if (input.courierCode || candidates.length === 1) {
+          throw new BadRequestException(
+            input.slot ? `The ${slotLabel(requested.slotStart)} pickup is already closed. Pick a later slot.` : 'No open pickup slot found for this courier. Contact operations.',
+          );
+        }
+        continue;
+      }
+      if (open.slotStart.getTime() - now.getTime() < 2 * 60 * 60 * 1000 || closedReason(open.slotStart)) continue;
+      try {
+        const booked = await this.couriers.bookWith(q.courierCode, { ...rateReq, orderNumber: input.orderNumber, idempotencyKey: input.idempotencyKey }, now);
+        chosen = { quote: q, booked, ...open };
+        break;
+      } catch (e) {
+        if (!(e instanceof BookingError)) throw e;
+        failures.push({ courierCode: e.courierCode, courierName: e.courierName, reason: e.reason });
+        await this.bookingFailed(brandId, e, input.orderNumber, now);
+      }
+    }
+    if (!chosen) {
+      if (failures.length) {
+        const next = input.courierCode ? quotes.find((q) => q.serviceable && q.courierCode !== input.courierCode) : null;
+        throw new BadRequestException(
+          `Booking with ${failures.map((f) => `${f.courierName} failed (${f.reason})`).join('; ')}. An issue was raised with the courier.` +
+            (next ? ` Book with ${next.courierName} (₹${next.total}) instead.` : ''),
+        );
+      }
+      throw new BadRequestException('No open pickup slot found for this order. Contact operations.');
+    }
+    const { booked, slotStart, slotEnd } = chosen;
+    const picked = chosen.quote;
+    const adapter = this.couriers.get(picked.courierCode);
     const owner = await this.brands.ownerFor('OPS');
 
     const shipment = await this.prisma.$transaction(async (tx) => {
@@ -124,27 +162,27 @@ export class ShipmentsService {
         create: { ...orderData, brandId, orderNumber: input.orderNumber, source: 'MANUAL', createdAt: now },
       });
       const pickup = await tx.pickup.upsert({
-        where: { warehouseId_courierCode_slotStart: { warehouseId: warehouse.id, courierCode: quote.courierCode, slotStart } },
+        where: { warehouseId_courierCode_slotStart: { warehouseId: warehouse.id, courierCode: picked.courierCode, slotStart } },
         update: { parcelCount: { increment: 1 } },
-        create: { brandId, warehouseId: warehouse.id, courierCode: quote.courierCode, slotStart, slotEnd, parcelCount: 1, createdAt: now },
+        create: { brandId, warehouseId: warehouse.id, courierCode: picked.courierCode, slotStart, slotEnd, parcelCount: 1, createdAt: now },
       });
       const created = await tx.shipment.create({
         data: {
           brandId,
           orderId: order.id,
-          courierCode: quote.courierCode,
+          courierCode: picked.courierCode,
           awb: booked.awb,
           isDemo: adapter.mode === 'DEMO',
           status: 'BOOKED',
           chargedAmount: booked.chargedAmount,
           chargedWeightG: booked.chargedWeightGrams,
-          etaDays: quote.etaDays,
+          etaDays: picked.etaDays,
           expectedDelivery: booked.expectedDelivery,
           pickupId: pickup.id,
           lastScanAt: now,
           idempotencyKey: input.idempotencyKey,
           createdAt: now,
-          events: { create: { status: 'BOOKED', location: warehouse.city, remark: `Booked with ${quote.courierName}`, occurredAt: now } },
+          events: { create: { status: 'BOOKED', location: warehouse.city, remark: `Booked with ${picked.courierName}`, occurredAt: now } },
         },
       });
       await tx.auditLog.create({
@@ -154,14 +192,14 @@ export class ShipmentsService {
           action: 'SHIPMENT_BOOKED',
           entityType: 'Shipment',
           entityId: created.id,
-          after: { awb: booked.awb, courier: quote.courierCode, slotStart: slotStart.toISOString(), charged: booked.chargedAmount },
+          after: { awb: booked.awb, courier: picked.courierCode, failedOver: failures, slotStart: slotStart.toISOString(), charged: booked.chargedAmount },
           createdAt: now,
         },
       });
       return created;
     });
 
-    return this.summary(shipment.id);
+    return { ...(await this.summary(shipment.id)), failedOver: failures };
   }
 
   /** Books many orders; each row succeeds or fails on its own. */
@@ -176,6 +214,36 @@ export class ShipmentsService {
       }
     }
     return { booked: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
+  }
+
+  /**
+   * One open issue per failing courier connection: a new failure is added to it
+   * rather than opening another. The issue engine gives it to the courier's
+   * account manager and reminds them until it is fixed.
+   */
+  private async bookingFailed(brandId: string, e: BookingError, orderNumber: string, now: Date) {
+    const open = await this.prisma.redFlag.findFirst({ where: { brandId, type: 'BOOKING_FAILED', courierCode: e.courierCode, resolvedAt: null } });
+    if (open) {
+      await this.prisma.issueEvent.create({
+        data: { flagId: open.id, kind: 'SYSTEM', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Failed again for order #${orderNumber}: ${e.reason}`, createdAt: now },
+      });
+      return;
+    }
+    const owner = await this.brands.ownerFor('OPS');
+    await this.prisma.redFlag.create({
+      data: {
+        brandId,
+        courierCode: e.courierCode,
+        type: 'BOOKING_FAILED',
+        severity: 'CRITICAL',
+        title: `${e.courierName} bookings failing`,
+        message: `${e.reason} · first seen on order #${orderNumber}. Orders are going to the next courier meanwhile.`,
+        action: 'Get the courier to fix the connection',
+        dueAt: new Date(now.getTime() + 4 * 3600_000),
+        ownerId: owner?.id,
+        createdAt: now,
+      },
+    });
   }
 
   async summary(id: string) {
@@ -299,11 +367,12 @@ export class ShipmentsService {
 
   async warehouses() {
     const brandId = await this.brands.currentBrandId();
-    return this.prisma.warehouse.findMany({
+    const rows = await this.prisma.warehouse.findMany({
       where: { brandId },
-      select: { code: true, name: true, city: true, pincode: true, cluster: true },
+      select: { code: true, name: true, city: true, pincode: true, cluster: true, opensAt: true, closesAt: true, saturdayClosesAt: true },
       orderBy: { name: 'asc' },
     });
+    return rows.map((w) => ({ ...w, hours: hoursLabel(w) }));
   }
 
   /** Orders created today (IST) vs. shipped, by our brand. */

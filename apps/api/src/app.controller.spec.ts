@@ -14,11 +14,11 @@ describe('AppController', () => {
 
   it('reports ok when the database answers', async () => {
     const controller = await controllerWith(() => Promise.resolve([{ '?column?': 1 }]));
-    expect(await controller.health()).toEqual({ status: 'ok', database: 'up' });
+    expect(await controller.health()).toMatchObject({ status: 'ok', database: 'up', jobs: { status: 'running' } });
   });
 
   it('reports degraded when the database is down', async () => {
     const controller = await controllerWith(() => Promise.reject(new Error('down')));
-    expect(await controller.health()).toEqual({ status: 'degraded', database: 'down' });
+    expect(await controller.health()).toMatchObject({ status: 'degraded', database: 'down' });
   });
 });

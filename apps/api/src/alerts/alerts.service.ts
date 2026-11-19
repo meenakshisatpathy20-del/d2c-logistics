@@ -255,7 +255,7 @@ export class AlertsService {
       `D2C Logistics · ${s.day}`,
       `Booked ${s.booked} · picked up ${s.pickedUp} · delivered ${s.delivered} · RTO started ${s.rtoStarted}`,
       `Pickups ${s.pickups.done}/${s.pickups.due} done${s.pickups.missed ? `, ${s.pickups.missed} missed` : ''}`,
-      `Stuck (no scan 48 h): ${s.stuck} · red flags open: ${s.redFlagsOpen} (${s.critical} critical, ${s.overdue} overdue)`,
+      `Stuck (no scan 48 h): ${s.stuck} · issues open: ${s.redFlagsOpen} (${s.critical} critical, ${s.overdue} overdue)`,
       `COD with couriers: ${inr(s.codPending)} on ${s.codPendingOrders} orders · advances held ${inr(s.advancesHeld)} · freight today ${inr(s.freightToday)}`,
     ];
     if (s.topProblems.length) lines.push('Top problems:', ...s.topProblems.map((p, i) => `${i + 1}. ${p.title} (${p.owner})`));

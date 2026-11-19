@@ -11,11 +11,12 @@ import { TodayController } from '../today/today.controller.js';
 import { TodayService } from '../today/today.service.js';
 import { TrackingService } from '../tracking/tracking.service.js';
 import { JobsService } from './jobs.service.js';
+import { WatchdogService } from './watchdog.service.js';
 
 @Module({
   imports: [CouriersModule, ShipmentsModule, AlertsModule],
   controllers: [TodayController, VendorController, IssuesController],
-  providers: [PickupsService, TrackingService, JobsService, TodayService, VendorService, IssuesService],
+  providers: [PickupsService, TrackingService, JobsService, WatchdogService, TodayService, VendorService, IssuesService],
   exports: [JobsService],
 })
 export class JobsModule {}

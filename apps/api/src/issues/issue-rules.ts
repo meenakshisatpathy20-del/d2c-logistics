@@ -44,6 +44,21 @@ export const RAISED: Record<string, { label: string; group: Group; scope: Scope 
 export const RAISED_TYPES = Object.fromEntries(Object.entries(RAISED).map(([k, v]) => [k, v.label])) as Record<string, string>;
 export type RaisedType = keyof typeof RAISED;
 
+/**
+ * Raised by the deadline check, so no shipment can go quiet at any step.
+ * Each one closes by itself when the parcel moves on.
+ */
+export const WATCHDOG: Record<string, { label: string; group: Group; turn: Party }> = {
+  NOT_BOOKED: { label: 'Order not booked within 24 hours', group: 'BOOKING', turn: 'OURS' },
+  NOT_PACKED: { label: 'Parcels not packed 1 hour before pickup', group: 'PICKUPS', turn: 'VENDOR' },
+  PARCELS_WAITING: { label: 'Parcels waiting at a vendor more than 1 working day', group: 'PICKUPS', turn: 'COURIER' },
+  NOT_AT_HUB: { label: 'Picked up but not at the hub within 24 hours', group: 'TRANSIT', turn: 'COURIER' },
+  OFD_NO_RESULT: { label: 'Out for delivery, no result by 9 pm', group: 'DELIVERY', turn: 'COURIER' },
+  DELAYED: { label: 'Delivery date passed', group: 'TRANSIT', turn: 'COURIER' },
+  RETURN_STUCK: { label: 'Return not back in 10 days', group: 'RETURNS', turn: 'COURIER' },
+  ATTEMPTS_3: { label: '3 or more failed delivery attempts', group: 'DELIVERY', turn: 'OURS' },
+};
+
 const GROUP: Record<string, Group> = {
   PICKUP_UNCONFIRMED: 'PICKUPS',
   PICKUP_MISSED: 'PICKUPS',
@@ -52,6 +67,7 @@ const GROUP: Record<string, Group> = {
   RTO: 'RETURNS',
   WEIGHT_DISPUTE: 'WEIGHT',
   ...Object.fromEntries(Object.entries(RAISED).map(([k, v]) => [k, v.group])),
+  ...Object.fromEntries(Object.entries(WATCHDOG).map(([k, v]) => [k, v.group])),
 };
 export const groupOf = (type: string): Group => GROUP[type] ?? 'OTHER';
 export const GROUP_TYPES = (g: Group) => Object.entries(GROUP).filter(([, v]) => v === g).map(([k]) => k);
@@ -60,7 +76,7 @@ export const GROUP_TYPES = (g: Group) => Object.entries(GROUP).filter(([, v]) =>
 export function firstTurn(type: string): Party {
   // Our team acts first where we hold the proof or must call the customer.
   if (['NDR', 'RTO', 'WEIGHT_DISPUTE', 'OTHER'].includes(type)) return 'OURS';
-  return 'COURIER';
+  return WATCHDOG[type]?.turn ?? 'COURIER';
 }
 
 /** Which courier person an issue goes to first. */
@@ -68,13 +84,13 @@ export const contactRoleFor = (type: string) => (groupOf(type) === 'PICKUPS' ? '
 
 /** Closing needs one of these real outcomes, not just "done". */
 export const OUTCOMES: Record<Group, string[]> = {
-  PICKUPS: ['Picked up', 'Moved to another courier', 'Postponed by the vendor', 'Manifest corrected', 'Order cancelled'],
+  PICKUPS: ['Picked up', 'Packed and ready', 'Moved to another courier', 'Postponed by the vendor', 'Manifest corrected', 'Order cancelled'],
   TRANSIT: ['Moving again', 'Delivered', 'Declared lost, claim raised', 'Claim paid'],
-  DELIVERY: ['Delivered', 'Delivered after address fix', 'Customer received it', 'Executive warned or changed', 'Claim raised with the courier', 'Claim paid', 'Customer cancelled'],
+  DELIVERY: ['Delivered', 'Delivered after address fix', 'Attempt recorded', 'Returned to seller', 'Customer received it', 'Executive warned or changed', 'Claim raised with the courier', 'Claim paid', 'Customer cancelled'],
   RETURNS: ['Customer accepted after a call', 'Return received at warehouse', 'Reverse pickup done', 'Return charge reversed', 'Return stopped', 'Claim paid'],
   WEIGHT: ['Dispute won', 'Dispute lost', 'Charge accepted', 'Charge reversed'],
   MONEY: ['Credited', 'Credit note received', 'Adjusted in the invoice', 'Remitted in full', 'Charge reversed', 'Claim paid', 'Written off'],
-  BOOKING: ['Bookings unblocked', 'Booking fixed', 'Moved to another courier'],
+  BOOKING: ['Booked', 'Order cancelled', 'Bookings unblocked', 'Booking fixed', 'Moved to another courier'],
   OTHER: ['Solved', 'Not a problem'],
 };
 

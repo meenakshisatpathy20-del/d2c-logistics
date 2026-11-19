@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   Ban,
   Camera,
-  Check,
   CircleAlert,
   FileText,
   Flag,
@@ -95,7 +94,7 @@ export function OrderDetailView({ id }: { id: string }) {
 
   const live = o.shipments.find((s) => s.status !== "CANCELLED") ?? null;
   const st = STATUS[o.status] ?? { label: o.status, tone: "grey" as const };
-  const openFlags = o.shipments.flatMap((s) => s.flags.filter((f) => f.open));
+  const openFlags = [...(o.orderFlags ?? []), ...o.shipments.flatMap((s) => s.flags.filter((f) => f.open))];
 
   async function ship() {
     setShipping(true);
@@ -388,11 +387,11 @@ export function OrderDetailView({ id }: { id: string }) {
 function FlagRow({ flag, onChanged }: { flag: OrderDetail["shipments"][number]["flags"][number]; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = async (kind: "act" | "resolve") => {
+  const run = async (kind: "act") => {
     setBusy(true);
     setError(null);
     try {
-      await actOnFlag(flag.id, { kind, note: kind === "resolve" ? "Solved from the order page" : undefined });
+      await actOnFlag(flag.id, { kind });
       announceShipmentsChanged();
       onChanged();
     } catch (e) {
@@ -412,16 +411,13 @@ function FlagRow({ flag, onChanged }: { flag: OrderDetail["shipments"][number]["
         </p>
         {flag.escalationLevel ? <p className="mt-0.5 text-[12px] font-medium text-flag-red">⬆ {ESCALATED[flag.escalationLevel]}</p> : null}
         {acted ? <p className="mt-0.5 text-[12.5px] font-medium text-[#0e6e05]">✓ {flag.note}</p> : null}
-        <Link href={`/issues/${flag.id}`} className="mt-1 inline-block text-[12.5px] font-medium text-brand-blue hover:underline">
-          Open the issue room →
-        </Link>
         {error ? <p className="mt-0.5 text-xs text-flag-red">{error}</p> : null}
       </div>
       <div className="flex gap-2">
-        <Button size="sm" variant="secondary" disabled={busy} onClick={() => run("resolve")}>
-          <Check size={14} /> Solved
-        </Button>
-        {!acted && flag.action ? (
+        <Link href={`/issues/${flag.id}`} className="inline-flex h-8 items-center rounded-lg border border-line px-3 text-[13px] font-medium text-ink-2 hover:bg-page">
+          Open the issue room
+        </Link>
+        {!acted && flag.action && flag.type !== "NOT_BOOKED" ? (
           <Button size="sm" disabled={busy} onClick={() => run("act")}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : null} {flag.action}
           </Button>

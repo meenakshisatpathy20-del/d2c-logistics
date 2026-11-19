@@ -1,3 +1,4 @@
+import { hoursLabel, SLOT_HOURS, SLOT_STARTS, type WorkingHours } from '../common/ist.js';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import { hashPassword } from '../auth/passwords.js';
@@ -30,8 +31,20 @@ export const WarehouseSchema = z.object({
   cluster: z.string().trim().max(80).optional(),
   contactName: z.string().trim().min(2).max(80),
   contactPhone: phone,
+  // Working hours (IST, whole hours). Pickups are booked only inside them.
+  opensAt: z.number().int().min(6).max(20).optional(),
+  closesAt: z.number().int().min(8).max(23).optional(),
+  saturdayClosesAt: z.number().int().min(8).max(23).nullable().optional(),
 });
 export const WarehousePatchSchema = WarehouseSchema.omit({ code: true }).partial();
+
+/** Hours must hold at least one 2-hour pickup slot (10, 12, 2 or 4 o'clock), on weekdays and on an open Saturday. */
+function checkHours(h: WorkingHours) {
+  const fits = (close: number) => SLOT_STARTS.some((s) => s >= h.opensAt && s + SLOT_HOURS <= close);
+  if (h.closesAt <= h.opensAt) throw new BadRequestException('Closing time must be after opening time');
+  if (!fits(h.closesAt)) throw new BadRequestException('These hours leave no 2-hour pickup slot (slots start at 10 am, 12 pm, 2 pm and 4 pm)');
+  if (h.saturdayClosesAt !== null && !fits(h.saturdayClosesAt)) throw new BadRequestException('Saturday hours leave no pickup slot; mark Saturday closed instead');
+}
 
 /**
  * Team, warehouses and vendor contacts, kept by our own admins. A warehouse's
@@ -107,6 +120,10 @@ export class SettingsService {
         cluster: w.cluster,
         contactName: w.contactName,
         contactPhone: w.contactPhone,
+        opensAt: w.opensAt,
+        closesAt: w.closesAt,
+        saturdayClosesAt: w.saturdayClosesAt,
+        hours: hoursLabel(w),
         placeholder: w.contactName.startsWith('Contact '),
         vendorLogin: v ? { active: v.active, lastLoginAt: v.lastLoginAt } : null,
       };
@@ -134,6 +151,7 @@ export class SettingsService {
   async addWarehouse(actorId: string, input: z.infer<typeof WarehouseSchema>) {
     const brandId = await this.brands.currentBrandId();
     if (await this.prisma.warehouse.findUnique({ where: { brandId_code: { brandId, code: input.code } } })) throw new ConflictException('That warehouse code is already used');
+    checkHours({ opensAt: input.opensAt ?? 10, closesAt: input.closesAt ?? 19, saturdayClosesAt: input.saturdayClosesAt === undefined ? 16 : input.saturdayClosesAt });
     const w = await this.prisma.warehouse.create({ data: { ...input, brandId } });
     await this.syncVendor(brandId, w);
     await this.audit(brandId, actorId, 'WAREHOUSE_ADDED', 'Warehouse', w.id, { code: w.code, name: w.name });
@@ -144,6 +162,11 @@ export class SettingsService {
     const brandId = await this.brands.currentBrandId();
     const w = await this.prisma.warehouse.findUnique({ where: { brandId_code: { brandId, code: code.toUpperCase() } } });
     if (!w) throw new NotFoundException('Warehouse not found');
+    checkHours({
+      opensAt: patch.opensAt ?? w.opensAt,
+      closesAt: patch.closesAt ?? w.closesAt,
+      saturdayClosesAt: patch.saturdayClosesAt === undefined ? w.saturdayClosesAt : patch.saturdayClosesAt,
+    });
     const updated = await this.prisma.warehouse.update({ where: { id: w.id }, data: patch });
     if (patch.contactPhone || patch.name) await this.syncVendor(brandId, updated);
     await this.audit(brandId, actorId, 'WAREHOUSE_UPDATED', 'Warehouse', w.id, patch);

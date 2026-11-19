@@ -143,7 +143,7 @@ describe('Sign-in and the gap fixes (e2e)', () => {
   });
 
   describe('needs-you actions', () => {
-    it('takes the suggested action, reassigns, and closes a problem for good', async () => {
+    it('takes the suggested action, reassigns, and closes only with an outcome', async () => {
       const b = await agent.post('/api/shipments').send(order('F')).expect(201);
       const brand = await prisma.brand.findUniqueOrThrow({ where: { slug: 'd2c' } });
       const flag = await prisma.redFlag.create({
@@ -154,11 +154,13 @@ describe('Sign-in and the gap fixes (e2e)', () => {
       const team = await agent.get('/api/team').expect(200);
       const support = team.body.find((u: { role: string }) => u.role === 'SUPPORT');
       await agent.post(`/api/flags/${flag.id}/act`).send({ kind: 'reassign', ownerId: support.id }).expect(201);
-      await agent.post(`/api/flags/${flag.id}/act`).send({ kind: 'resolve', note: 'Delivered on reattempt' }).expect(201);
+      // Closing without an outcome is refused; the issue room closes it with what solved it.
+      await agent.post(`/api/flags/${flag.id}/act`).send({ kind: 'resolve', note: 'Delivered on reattempt' }).expect(400);
+      await agent.post(`/api/issues/${flag.id}/act`).send({ kind: 'resolve', outcome: 'Customer cancelled', faultParty: 'CUSTOMER' }).expect(200);
       const f = await prisma.redFlag.findUniqueOrThrow({ where: { id: flag.id } });
       expect(f.ownerId).toBe(support.id);
       expect(f.resolvedAt).toBeTruthy();
-      expect(f.note).toMatch(/Delivered on reattempt/);
+      expect(f.outcome).toBe('Customer cancelled');
       await agent.post(`/api/flags/${flag.id}/act`).send({ kind: 'act' }).expect(400);
     });
   });

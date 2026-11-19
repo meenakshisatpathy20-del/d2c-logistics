@@ -270,14 +270,23 @@ export class PickupsService {
           paymentMode: s.order.paymentMode,
           codAmount: Number(s.order.codAmount),
         };
-        const best = this.couriers
+        const ranked = this.couriers
           .compareRates(req)
           .filter((q) => q.serviceable && q.courierCode !== from.courierCode)
-          .sort((a, b) => b.pickupOnTimePct - a.pickupOnTimePct || a.total - b.total)[0];
-        if (!best) continue;
-        const booked = await this.couriers
-          .get(best.courierCode)
-          .book({ ...req, orderNumber: s.order.orderNumber, idempotencyKey: `${s.idempotencyKey}:${best.courierCode}` }, now);
+          .sort((a, b) => b.pickupOnTimePct - a.pickupOnTimePct || a.total - b.total);
+        // If a courier's connection fails, the next most reliable one is tried.
+        let best: (typeof ranked)[number] | null = null;
+        let booked: Awaited<ReturnType<CouriersService['bookWith']>> | null = null;
+        for (const q of ranked) {
+          try {
+            booked = await this.couriers.bookWith(q.courierCode, { ...req, orderNumber: s.order.orderNumber, idempotencyKey: `${s.idempotencyKey}:${q.courierCode}` }, now);
+            best = q;
+            break;
+          } catch {
+            continue;
+          }
+        }
+        if (!best || !booked) continue;
         // Cancel the old booking so the first courier neither comes nor bills us.
         const cancelled = await this.couriers
           .get(from.courierCode)

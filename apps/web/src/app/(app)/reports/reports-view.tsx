@@ -4,7 +4,7 @@ import { Loader2, Send } from "lucide-react";
 import { useState } from "react";
 import { useShell } from "@/components/shell/app-shell";
 import { Card, DemoBadge } from "@/components/ui/primitives";
-import { getLatestSummary, getOrders, getToday, sendSummaryNow, type Summary } from "@/lib/api";
+import { getDelayCost, getLatestSummary, getOrders, getToday, sendSummaryNow, type Summary } from "@/lib/api";
 import { formatINR } from "@/lib/format";
 import { useLive } from "@/lib/use-live";
 
@@ -19,6 +19,7 @@ export function ReportsView() {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <DailySummaryCard />
+      <DelayCostCard />
       <Card className="p-5">
         <h2 className="text-[15px] font-semibold text-ink">Delivery outcome</h2>
         {c ? (
@@ -58,6 +59,58 @@ export function ReportsView() {
         </table>
       </Card>
     </div>
+  );
+}
+
+/** Open problems in money, per courier: what is held up, COD not collected, and how they answer. */
+function DelayCostCard() {
+  const { data } = useLive(getDelayCost, 60_000);
+  return (
+    <Card className="p-5 lg:col-span-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-[15px] font-semibold text-ink">What open problems are costing us</h2>
+        {data ? (
+          <span className="text-[13px] text-ink-2">
+            {formatINR(data.total.value)} of orders held up · {formatINR(data.total.cod)} COD not collected
+          </span>
+        ) : null}
+      </div>
+      <table className="mt-3 w-full text-[13px]">
+        <thead className="text-left text-xs text-muted">
+          <tr>
+            <th className="py-1.5">Courier</th>
+            <th className="py-1.5 text-right">Open issues</th>
+            <th className="py-1.5 text-right">Waiting on them</th>
+            <th className="py-1.5 text-right">Held up</th>
+            <th className="py-1.5 text-right">COD stuck</th>
+            <th className="py-1.5 text-right">Most days late</th>
+            <th className="py-1.5 text-right">Reminders ignored</th>
+            <th className="py-1.5 text-right">Promises broken</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data && data.rows.length === 0 ? (
+            <tr>
+              <td colSpan={8} className="py-6 text-center text-muted">
+                Nothing open with any courier.
+              </td>
+            </tr>
+          ) : null}
+          {(data?.rows ?? []).map((r) => (
+            <tr key={r.code} className="border-t border-line">
+              <td className="py-2 font-medium text-ink">{r.courier}</td>
+              <td className="py-2 text-right tabular-nums">{r.issues}</td>
+              <td className="py-2 text-right tabular-nums">{r.waitingOnThem}</td>
+              <td className="py-2 text-right tabular-nums">{formatINR(r.value)}</td>
+              <td className="py-2 text-right tabular-nums">{formatINR(r.cod)}</td>
+              <td className={`py-2 text-right tabular-nums ${r.maxDaysLate >= 3 ? "font-semibold text-flag-red" : ""}`}>{r.maxDaysLate || "–"}</td>
+              <td className={`py-2 text-right tabular-nums ${r.remindersIgnored >= 3 ? "font-semibold text-flag-red" : ""}`}>{r.remindersIgnored || "–"}</td>
+              <td className={`py-2 text-right tabular-nums ${r.promisesBroken ? "font-semibold text-flag-red" : ""}`}>{r.promisesBroken || "–"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 
@@ -119,7 +172,7 @@ function DailySummaryCard() {
             <Stat label="RTO started" value={String(s.rtoStarted)} warn={s.rtoStarted > 0} />
             <Stat label="Pickups done" value={`${s.pickups.done}/${s.pickups.due}`} />
             <Stat label="Stuck 48 h+" value={String(s.stuck)} warn={s.stuck > 0} />
-            <Stat label="Red flags open" value={String(s.redFlagsOpen)} warn={s.critical > 0} />
+            <Stat label="Issues open" value={String(s.redFlagsOpen)} warn={s.critical > 0} />
             <Stat label="COD with couriers" value={formatINR(s.codPending)} />
           </dl>
           {s.topProblems.length ? (

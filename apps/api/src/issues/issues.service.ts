@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { z } from 'zod';
 import { AlertsService, fullLink } from '../alerts/alerts.service.js';
 import { BrandService } from '../common/brand.service.js';
-import { closedReason, istHour } from '../common/ist.js';
+import { closedReason, hoursLabel, istHour, slotFits, slotLabel } from '../common/ist.js';
 import { DEMO_COURIERS } from '../couriers/demo/profiles.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PickupsService } from '../pickups/pickups.service.js';
@@ -88,6 +88,7 @@ export const ContactSchema = z.object({
   active: z.boolean().optional(),
 });
 
+type Cost = { parcels: number; value: number; cod: number; daysLate: number };
 type Actor = { id: string; name: string; role: string; warehouseId?: string | null };
 
 const include = {
@@ -95,6 +96,7 @@ const include = {
   courierContact: true,
   shipment: { include: { order: { include: { pickupWarehouse: true } }, courier: true } },
   pickup: { include: { warehouse: true, courier: true } },
+  order: { include: { pickupWarehouse: true } },
 } satisfies Prisma.RedFlagInclude;
 type Flag = Prisma.RedFlagGetPayload<{ include: typeof include }>;
 
@@ -121,6 +123,7 @@ export class IssuesService {
   private courierOf(f: Flag): { code: string; name: string } | null {
     if (f.shipment) return { code: f.shipment.courierCode, name: f.shipment.courier.name };
     if (f.pickup) return { code: f.pickup.courierCode, name: f.pickup.courier.name };
+    if (f.courierCode) return { code: f.courierCode, name: DEMO_COURIERS.find((c) => c.code === f.courierCode)?.name ?? f.courierCode };
     if (f.courierContact) {
       const code = f.courierContact.courierCode;
       return { code, name: DEMO_COURIERS.find((c) => c.code === code)?.name ?? code };
@@ -129,7 +132,7 @@ export class IssuesService {
   }
 
   private vendorOf(f: Flag) {
-    return f.pickup?.warehouse ?? f.shipment?.order.pickupWarehouse ?? null;
+    return f.pickup?.warehouse ?? f.shipment?.order.pickupWarehouse ?? f.order?.pickupWarehouse ?? null;
   }
 
   /** The person whose turn it is, by name, so a delay sits with someone on the record. */
@@ -149,7 +152,7 @@ export class IssuesService {
         return w ? `${w.contactName} (${w.name})` : 'Vendor';
       }
       case 'CUSTOMER':
-        return f.shipment ? `${f.shipment.order.customerName} (customer)` : 'Customer';
+        return f.shipment ? `${f.shipment.order.customerName} (customer)` : f.order ? `${f.order.customerName} (customer)` : 'Customer';
       default:
         return f.owner?.name ?? 'Our team';
     }
@@ -170,7 +173,7 @@ export class IssuesService {
   // ---------- Engine: open new issues, reminders, broken promises ----------
 
   async run(now: Date = new Date()) {
-    const opened = await this.openNew();
+    const opened = await this.openNew(now);
     const broken = await this.brokenPromises(now);
     const reminded = await this.remind(now);
     if (opened || broken || reminded) this.log.log({ opened, broken, reminded });
@@ -178,7 +181,7 @@ export class IssuesService {
   }
 
   /** A red flag raised by the rules becomes an issue: first turn, courier contact, first line of the story. */
-  private async openNew() {
+  private async openNew(now: Date) {
     const brandId = await this.brands.currentBrandId();
     const fresh = await this.prisma.redFlag.findMany({ where: { brandId, resolvedAt: null, waitingSince: null }, include });
     for (const f of fresh) {
@@ -189,8 +192,33 @@ export class IssuesService {
         data: { waitingOn: f.waitingOn ?? firstTurn(f.type), waitingSince: f.createdAt, ...(contact ? { courierContactId: contact.id } : {}) },
       });
       await this.event(f.id, { kind: 'SYSTEM', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Raised automatically: ${f.title}. ${f.message}`, at: f.createdAt });
+      await this.tellFirst(f.id, brandId, now);
     }
     return fresh.length;
+  }
+
+  /**
+   * The other side hears about it the moment it is their turn, not at the first
+   * reminder. Outside 9 am–8 pm (or on a Sunday) the first reminder at 9 am does it.
+   */
+  private async tellFirst(id: string, brandId: string, now: Date) {
+    if (closedReason(now) || istHour(now) < REMIND_FROM_HOUR || istHour(now) >= REMIND_UNTIL_HOUR) return;
+    const f = await this.load(id, brandId);
+    if (f.waitingOn !== 'COURIER' && f.waitingOn !== 'VENDOR') return;
+    const target = this.reminderTarget(f);
+    await this.alerts.send({
+      brandId,
+      channel: 'WHATSAPP',
+      to: target.phone ? `+91 ${target.phone}` : target.name,
+      kind: 'ISSUE_OPENED',
+      title: f.title,
+      body: `${f.title}\n${f.message}\nPlease reply with a name and a time, or the result.\n${this.replyHint(f.waitingOn)}`,
+      link: `/issues/${f.id}`,
+      dedupeKey: `opened:${f.id}:${f.waitingSince?.getTime() ?? 0}`,
+      now,
+    });
+    await this.prisma.redFlag.update({ where: { id }, data: { lastReminderAt: now } });
+    await this.event(id, { kind: 'ASK', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Sent to ${target.name} on WhatsApp.`, via: 'WHATSAPP', at: now });
   }
 
   /** A promised time passed with the issue still open: counted, and the reminders start again. */
@@ -367,11 +395,11 @@ export class IssuesService {
       page,
       pages: Math.max(1, Math.ceil(total / size)),
       counts: { groups, waiting: Object.fromEntries(byWaiting.map((w) => [w.waitingOn ?? 'OURS', w._count])) },
-      rows: rows.map((f) => this.row(f, now)),
+      rows: await this.costs(rows, now).then((c) => rows.map((f) => this.row(f, now, c.get(f.id) ?? null))),
     };
   }
 
-  private row(f: Flag, now: Date) {
+  private row(f: Flag, now: Date, cost: Cost | null = null) {
     const waitedMs = f.waitingSince ? now.getTime() - f.waitingSince.getTime() : 0;
     return {
       id: f.id,
@@ -381,10 +409,14 @@ export class IssuesService {
       message: f.message,
       severity: f.severity === 'CRITICAL' ? 'critical' : 'warning',
       about: f.shipment
-        ? { kind: 'order', id: f.shipment.orderId, label: `#${f.shipment.order.orderNumber}`, sub: `${f.shipment.courier.name} · ${f.shipment.awb}` }
+        ? { kind: 'order', id: f.shipment.orderId, label: `#${f.shipment.order.orderNumber}`, sub: f.message.startsWith(f.shipment.courier.name) ? f.shipment.awb : `${f.shipment.courier.name} · ${f.shipment.awb}` }
         : f.pickup
           ? { kind: 'pickup', id: f.pickup.id, label: f.pickup.warehouse.name, sub: `${f.pickup.courier.name} pickup` }
-          : null,
+          : f.order
+            ? { kind: 'order', id: f.order.id, label: `#${f.order.orderNumber}`, sub: `${f.order.pickupWarehouse.name} · not booked` }
+            : this.courierOf(f)
+              ? { kind: 'courier', id: this.courierOf(f)!.code, label: this.courierOf(f)!.name, sub: 'Courier account' }
+              : null,
       waitingOn: this.turn(f),
       waitingOnLabel: PARTY_LABEL[this.turn(f)],
       waitingPerson: this.turnPerson(f),
@@ -401,7 +433,73 @@ export class IssuesService {
       resolvedAt: f.resolvedAt,
       outcome: f.outcome,
       faultParty: f.faultParty,
+      cost,
     };
+  }
+
+  /**
+   * What the delay is costing, in rupees: the value of the orders held up, the
+   * COD cash not yet collected, and how many days past the promised delivery.
+   */
+  async costs(flags: Flag[], now: Date): Promise<Map<string, Cost>> {
+    const out = new Map<string, Cost>();
+    const pickupIds = flags.flatMap((f) => (f.pickup ? [f.pickup.id, ...(f.pickup.movedToId ? [f.pickup.movedToId] : [])] : []));
+    const pickupShipments = pickupIds.length
+      ? await this.prisma.shipment.findMany({
+          where: { pickupId: { in: pickupIds }, status: { notIn: ['CANCELLED', 'DELIVERED', 'RTO_DELIVERED'] } },
+          include: { order: true },
+        })
+      : [];
+    const of = (list: { expectedDelivery: Date | null; status: string; order: { orderValue: unknown; codAmount: unknown; paymentMode: string } }[]): Cost | null => {
+      if (!list.length) return null;
+      let value = 0;
+      let cod = 0;
+      let daysLate = 0;
+      for (const s of list) {
+        value += Number(s.order.orderValue);
+        if (s.order.paymentMode === 'COD' && s.status !== 'DELIVERED') cod += Number(s.order.codAmount);
+        if (s.expectedDelivery && s.expectedDelivery < now && s.status !== 'DELIVERED') daysLate = Math.max(daysLate, Math.floor((now.getTime() - s.expectedDelivery.getTime()) / (24 * HOUR)));
+      }
+      return { parcels: list.length, value: Math.round(value), cod: Math.round(cod), daysLate };
+    };
+    for (const f of flags) {
+      let c: Cost | null = null;
+      if (f.shipment) c = of([{ ...f.shipment, order: f.shipment.order }]);
+      else if (f.pickup) c = of(pickupShipments.filter((s) => s.pickupId === f.pickup!.id || s.pickupId === f.pickup!.movedToId));
+      else if (f.order) c = { parcels: 1, value: Math.round(Number(f.order.orderValue)), cod: f.order.paymentMode === 'COD' ? Math.round(Number(f.order.codAmount)) : 0, daysLate: 0 };
+      if (c) out.set(f.id, c);
+    }
+    return out;
+  }
+
+  /** Per courier: what its open problems are costing us, and how it answers. */
+  async delayCost(now = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+    const open = await this.prisma.redFlag.findMany({ where: { brandId, resolvedAt: null }, include });
+    const cost = await this.costs(open, now);
+    const seen = new Set<string>();
+    const by = new Map<string, { courier: string; issues: number; parcels: number; value: number; cod: number; maxDaysLate: number; waitingOnThem: number; remindersIgnored: number; promisesBroken: number }>();
+    for (const f of open) {
+      const c = this.courierOf(f);
+      if (!c) continue;
+      const row = by.get(c.code) ?? { courier: c.name, issues: 0, parcels: 0, value: 0, cod: 0, maxDaysLate: 0, waitingOnThem: 0, remindersIgnored: 0, promisesBroken: 0 };
+      // The same parcel with two open problems is counted once.
+      const key = f.shipmentId ?? f.pickupId ?? f.orderId ?? f.id;
+      const k = seen.has(key) ? null : cost.get(f.id);
+      seen.add(key);
+      row.issues++;
+      row.parcels += k?.parcels ?? 0;
+      row.value += k?.value ?? 0;
+      row.cod += k?.cod ?? 0;
+      row.maxDaysLate = Math.max(row.maxDaysLate, k?.daysLate ?? 0);
+      if (this.turn(f) === 'COURIER') row.waitingOnThem++;
+      row.remindersIgnored += f.waitingOn === 'COURIER' ? f.reminderCount : 0;
+      row.promisesBroken += f.promisesBroken;
+      by.set(c.code, row);
+    }
+    const rows = [...by.entries()].map(([code, r]) => ({ code, ...r })).sort((a, b) => b.value - a.value || b.issues - a.issues);
+    const total = rows.reduce((t, r) => ({ value: t.value + r.value, cod: t.cod + r.cod, parcels: t.parcels + r.parcels }), { value: 0, cod: 0, parcels: 0 });
+    return { total, rows };
   }
 
   // ---------- Room ----------
@@ -433,17 +531,20 @@ export class IssuesService {
           : [{ party: 'COURIER', name: 'No contact added', role: 'Add one in Settings → Courier contacts', company: courier.name, phone: null, lastActive: null }]
         : []),
       ...(vendor ? [{ party: 'VENDOR', name: vendor.contactName, role: 'Vendor contact', company: vendor.name, phone: vendor.contactPhone, lastActive: lastBy('VENDOR') }] : []),
+      ...(f.order ? [{ party: 'CUSTOMER', name: f.order.customerName, role: 'Customer', company: f.order.city || f.order.pincode, phone: f.order.customerPhone, lastActive: lastBy('CUSTOMER') }] : []),
       ...(f.shipment ? [{ party: 'CUSTOMER', name: f.shipment.order.customerName, role: 'Customer', company: f.shipment.order.city || f.shipment.order.pincode, phone: f.shipment.order.customerPhone, lastActive: lastBy('CUSTOMER') }] : []),
     ];
 
+    const cost = (await this.costs([f], now)).get(f.id) ?? null;
     return {
-      ...this.row(f, now),
+      ...this.row(f, now, cost),
       open: !f.resolvedAt,
       action: f.action,
       outcomes: OUTCOMES[groupOf(f.type)],
       people,
       courierContacts: contacts.map((c) => ({ id: c.id, name: c.name, role: ROLE_LABEL[c.role], phone: c.phone })),
       team,
+      order: f.order ? { id: f.order.id, orderNumber: f.order.orderNumber, status: f.order.status } : null,
       shipment: f.shipment
         ? { id: f.shipment.id, orderId: f.shipment.orderId, orderNumber: f.shipment.order.orderNumber, status: f.shipment.status, courier: f.shipment.courier.name, awb: f.shipment.awb, city: f.shipment.order.city }
         : null,
@@ -457,6 +558,8 @@ export class IssuesService {
             canPostpone: ['SCHEDULED', 'CONFIRMED'].includes(f.pickup.status) && f.pickup.slotEnd > now,
             canSwitch: ['SCHEDULED', 'CONFIRMED', 'MISSED'].includes(f.pickup.status),
             manifestUrl: `/api/pickups/${f.pickup.id}/manifest.pdf`,
+            hours: hoursLabel(f.pickup.warehouse),
+            slotInHours: slotFits(f.pickup.slotStart, f.pickup.warehouse),
           }
         : null,
       events: events.map((e) => ({ id: e.id, kind: e.kind, by: e.actorName, party: e.actorParty, body: e.body, via: e.via, promiseAt: e.promiseAt, at: e.createdAt })),
@@ -576,6 +679,14 @@ export class IssuesService {
     if (['Delivered', 'Delivered after address fix'].includes(outcome) && f.shipment && f.shipment.status !== 'DELIVERED') {
       throw new BadRequestException('No delivered scan yet. The issue closes by itself when the courier scans it delivered.');
     }
+    if (outcome === 'Booked' && f.orderId) {
+      const booked = await this.prisma.shipment.count({ where: { orderId: f.orderId, status: { not: 'CANCELLED' } } });
+      if (!booked) throw new BadRequestException('The order is not booked yet. The issue closes by itself when it is.');
+    }
+    if (outcome === 'Packed and ready' && f.pickupId) {
+      const unpacked = await this.prisma.shipment.count({ where: { pickupId: f.pickupId, status: { in: ['BOOKED', 'PICKUP_SCHEDULED'] }, packedAt: null } });
+      if (unpacked) throw new BadRequestException(`${unpacked} parcels are still not marked packed by the vendor.`);
+    }
     if (NEEDS_REFERENCE.includes(outcome) && (note ?? '').trim().length < 4) {
       throw new BadRequestException('Add the reference as proof: UTR, credit note number or invoice line.');
     }
@@ -602,8 +713,12 @@ export class IssuesService {
     }
     if (!shipmentId && !input.pickupId && !courierCode) throw new BadRequestException('Raise it on an order, a pickup or a courier');
     // The same problem raised twice opens the existing issue instead of a second one.
-    if (shipmentId || input.pickupId) {
-      const same = await this.prisma.redFlag.findFirst({ where: { brandId, type: input.type, resolvedAt: null, shipmentId, pickupId: input.pickupId ?? null } });
+    {
+      const same = await this.prisma.redFlag.findFirst({
+        where: shipmentId || input.pickupId
+          ? { brandId, type: input.type, resolvedAt: null, shipmentId, pickupId: input.pickupId ?? null }
+          : { brandId, type: input.type, resolvedAt: null, courierCode: courierCode ?? null, shipmentId: null, pickupId: null },
+      });
       if (same) {
         await this.event(same.id, { kind: 'MESSAGE', actorId: actor.id, actorName: actor.name, actorParty: 'OURS', body: `Raised again: ${input.body}`, at: now });
         return this.detail(same.id, now);
@@ -616,6 +731,7 @@ export class IssuesService {
         brandId,
         shipmentId,
         pickupId: input.pickupId ?? null,
+        courierCode: shipmentId || input.pickupId ? null : (courierCode ?? null),
         type: input.type,
         severity: ['BOOKING_BLOCKED', 'BOOKING_FAILED', 'PICKUP_PENDING', 'LOST', 'EXECUTIVE_CONDUCT', 'NOT_RECEIVED'].includes(input.type) ? 'CRITICAL' : 'WARNING',
         title: input.title || RAISED[input.type].label,
@@ -631,6 +747,23 @@ export class IssuesService {
       },
     });
     await this.event(f.id, { kind: 'SYSTEM', actorId: actor.id, actorName: actor.name, actorParty: 'OURS', body: `Raised: ${input.body}`, at: now });
+    await this.tellFirst(f.id, brandId, now);
+    // "Warehouse was closed": checked against the hours the vendor declared, so it is not one word against another.
+    if (input.type === 'PICKUP_CLAIM' && input.pickupId) {
+      const p = await this.prisma.pickup.findUnique({ where: { id: input.pickupId }, include: { warehouse: true } });
+      if (p) {
+        const inside = slotFits(p.slotStart, p.warehouse);
+        await this.event(f.id, {
+          kind: 'SYSTEM',
+          actorName: 'D2C Logistics',
+          actorParty: 'SYSTEM',
+          body: inside
+            ? `Checked: the ${slotLabel(p.slotStart)} slot is inside ${p.warehouse.name}'s declared hours (${hoursLabel(p.warehouse)}). A "closed" claim needs a photo with time and place from the executive.`
+            : `Checked: the ${slotLabel(p.slotStart)} slot is outside ${p.warehouse.name}'s declared hours (${hoursLabel(p.warehouse)}). The slot was wrong, not the courier.`,
+          at: now,
+        });
+      }
+    }
     return this.detail(f.id, now);
   }
 

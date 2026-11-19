@@ -1,3 +1,4 @@
+import { firstTurn } from '../issues/issue-rules.js';
 import { Injectable } from '@nestjs/common';
 import { BrandService } from '../common/brand.service.js';
 import { CONFIRM_LEAD_HOURS, istAt, istDayStart, istHour, slotLabel } from '../common/ist.js';
@@ -110,7 +111,8 @@ export class TodayService {
       summary: {
         pickupsDue: counted.length,
         pickupsDone: counted.filter((p) => p.status === 'PICKED_UP').length,
-        needsYou: needsYou.length,
+        // Only what is waiting on our team; problems waiting on a courier or vendor are being chased.
+        needsYou: flags.filter((f) => (f.waitingOn ?? firstTurn(f.type)) === 'OURS').length,
       },
       needsYou,
       pickups: [...rows.values()],

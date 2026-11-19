@@ -197,6 +197,8 @@ export class OrdersService {
         pickupWarehouse: true,
         rtoWarehouse: true,
         messages: { orderBy: { createdAt: 'asc' } },
+        // Problems about the order itself, before it has a shipment (e.g. not booked in 24 hours).
+        redFlags: { where: { resolvedAt: null }, include: { owner: true }, orderBy: { createdAt: 'desc' } },
         shipments: {
           orderBy: { createdAt: 'desc' },
           include: {
@@ -271,6 +273,18 @@ export class OrdersService {
           open: !f.resolvedAt,
           createdAt: f.createdAt,
         })),
+      })),
+      orderFlags: o.redFlags.map((f) => ({
+        id: f.id,
+        type: f.type,
+        title: f.title,
+        message: f.message,
+        owner: f.owner?.name ?? null,
+        action: f.action,
+        note: f.note,
+        escalationLevel: f.escalationLevel,
+        open: true,
+        createdAt: f.createdAt,
       })),
       messages: o.messages.map((m) => ({ from: m.senderType, name: m.senderName, body: m.body, channel: m.channel, at: m.createdAt })),
       history: history.map((h) => ({

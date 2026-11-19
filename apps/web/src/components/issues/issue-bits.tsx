@@ -56,6 +56,20 @@ function Chip({ tone, icon, children }: { tone: "blue" | "amber" | "red"; icon?:
   return <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold", cls)}>{icon}{children}</span>;
 }
 
+const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+
+/** "₹4,500 held up · ₹1,500 COD · 3 days late": what the delay costs, in plain money. */
+export function costText(c: IssueRow["cost"]): string | null {
+  if (!c || (!c.value && !c.cod && !c.daysLate)) return null;
+  return [
+    c.value ? `${inr(c.value)} held up${c.parcels > 1 ? ` (${c.parcels} orders)` : ""}` : null,
+    c.cod ? `${inr(c.cod)} COD` : null,
+    c.daysLate ? `${c.daysLate} day${c.daysLate > 1 ? "s" : ""} late` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /** One issue in a list: what, about what, whose turn, how long. */
 export function IssueLine({ r }: { r: IssueRow }) {
   return (
@@ -81,6 +95,7 @@ export function IssueLine({ r }: { r: IssueRow }) {
               <WaitingOn party={r.waitingOn} person={r.waitingPerson} minutes={r.waitedMinutes} />
             )}
             {!r.resolvedAt ? <IssueChips r={r} /> : null}
+            {!r.resolvedAt && costText(r.cost) ? <span className="text-[12px] font-medium text-ink-2">{costText(r.cost)}</span> : null}
           </div>
         </div>
       </div>

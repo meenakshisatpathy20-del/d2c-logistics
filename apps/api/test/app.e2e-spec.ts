@@ -28,7 +28,9 @@ describe('API (e2e)', () => {
     return request(app.getHttpServer())
       .get('/api/health')
       .expect(200)
-      .expect({ status: 'ok', database: 'up' });
+      .expect((r) => {
+        expect(r.body).toMatchObject({ status: 'ok', database: 'up', jobs: { status: 'running' } });
+      });
   });
 
   it('GET /api/couriers lists all 8 demo couriers', async () => {

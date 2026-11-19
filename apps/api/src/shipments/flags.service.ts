@@ -22,6 +22,14 @@ export const FOLLOW_UP_HOURS: Record<string, number> = {
   PICKUP_UNCONFIRMED: 2,
   NDR: 24,
   WEIGHT_DISPUTE: 72,
+  NOT_AT_HUB: 4,
+  NOT_PACKED: 1,
+  PARCELS_WAITING: 2,
+  OFD_NO_RESULT: 12,
+  DELAYED: 24,
+  RETURN_STUCK: 24,
+  ATTEMPTS_3: 24,
+  NOT_BOOKED: 4,
 };
 
 /**
@@ -58,11 +66,8 @@ export class FlagsService {
     }
 
     if (input.kind === 'resolve') {
-      const note = input.note || 'Resolved';
-      await this.prisma.redFlag.update({ where: { id }, data: { resolvedAt: now, actedAt: now, outcome: 'Solved', faultParty: 'NONE', note: `${note} · ${actor.name}` } });
-      await this.audit(brandId, actor.id, 'FLAG_RESOLVED', id, { note }, now);
-      await this.prisma.issueEvent.create({ data: { flagId: id, kind: 'RESOLVED', actorId: actor.id, actorName: actor.name, actorParty: 'OURS', body: `Closed: ${note}`, createdAt: now } });
-      return { ok: true, message: 'Closed' };
+      // Closing needs a real outcome and, where it applies, proof: that happens in the issue room only.
+      throw new BadRequestException('Close it in the issue room, with what actually solved it.');
     }
 
     // act: record the suggested fix and tell the courier through the shipment's timeline.

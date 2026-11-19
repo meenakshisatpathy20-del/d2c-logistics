@@ -4,7 +4,7 @@
  * Times are India time, wherever the browser is.
  */
 export const SLOTS = [
-  { start: 10, label: "10–12 am" },
+  { start: 10, label: "10 am–12 pm" },
   { start: 12, label: "12–2 pm" },
   { start: 14, label: "2–4 pm" },
   { start: 16, label: "4–6 pm" },
@@ -14,7 +14,8 @@ export const CONFIRM_LEAD_HOURS = 2;
 
 export type SlotOption = {
   key: string;
-  day: "today" | "next";
+  /** "auto": no fixed slot; the platform books the first slot inside the warehouse's hours. */
+  day: "today" | "next" | "auto";
   dayLabel: string;
   start: number;
   label: string;
@@ -41,10 +42,20 @@ export function isWorkingDay(day: Date): boolean {
   return day.getUTCDay() !== 0 && !HOLIDAYS.includes(day.toISOString().slice(0, 10));
 }
 
-export function slotOptions(now: Date): SlotOption[] {
+export type Hours = { opensAt: number; closesAt: number; saturdayClosesAt: number | null };
+
+/** True when the 2-hour slot sits inside the warehouse's open hours that day (Saturday has its own). */
+function fits(start: number, day: Date, h?: Hours): boolean {
+  if (!h) return true;
+  const close = day.getUTCDay() === 6 ? h.saturdayClosesAt : h.closesAt;
+  return close !== null && start >= h.opensAt && start + 2 <= close;
+}
+
+export function slotOptions(now: Date, hours?: Hours): SlotOption[] {
   const hour = istHourNow(now);
-  const today = isWorkingDay(istDay(now, 0))
-    ? SLOTS.filter((s) => s.start - hour >= CONFIRM_LEAD_HOURS).map((s) => ({
+  const todayDay = istDay(now, 0);
+  const today = isWorkingDay(todayDay)
+    ? SLOTS.filter((s) => s.start - hour >= CONFIRM_LEAD_HOURS && fits(s.start, todayDay, hours)).map((s) => ({
         key: `today-${s.start}`,
         day: "today" as const,
         dayLabel: "Today",
@@ -57,7 +68,9 @@ export function slotOptions(now: Date): SlotOption[] {
   const next = istDay(now, offset);
   const nextLabel =
     offset === 1 ? "Tomorrow" : next.toLocaleDateString("en-IN", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
-  const later = SLOTS.map((s) => ({ key: `next-${s.start}`, day: "next" as const, dayLabel: nextLabel, start: s.start, label: s.label }));
-  // Always four choices: what is left today, then the next working day.
-  return [...today, ...later].slice(0, 4);
+  const later = SLOTS.filter((s) => fits(s.start, next, hours)).map((s) => ({ key: `next-${s.start}`, day: "next" as const, dayLabel: nextLabel, start: s.start, label: s.label }));
+  const options: SlotOption[] = [...today, ...later].slice(0, 4);
+  // The next working day may be a Saturday the warehouse is closed: let the platform find the slot.
+  if (options.length < 2) options.push({ key: "auto", day: "auto", dayLabel: "First open", start: 0, label: "Next open slot" });
+  return options;
 }

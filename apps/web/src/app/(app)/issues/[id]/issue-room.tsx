@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useCallback, useState } from "react";
-import { IssueChips, PARTY_NAME, PARTY_TONE, WaitingOn } from "@/components/issues/issue-bits";
+import { costText, IssueChips, PARTY_NAME, PARTY_TONE, WaitingOn } from "@/components/issues/issue-bits";
 import { Badge, Button, Card, Field, inputClass } from "@/components/ui/primitives";
 import { actOnIssue, getIssue, type IssueAction, type IssueDetail, type Party } from "@/lib/api";
 import { useLive } from "@/lib/use-live";
@@ -106,8 +106,9 @@ export function IssueRoom({ id }: { id: string }) {
           opened {when(issue.openedAt)}
         </p>
         {issue.open ? (
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
             <WaitingOn party={issue.waitingOn} person={issue.waitingPerson} minutes={issue.waitedMinutes} />
+            {costText(issue.cost) ? <span className="text-[13px] font-medium text-ink-2">Costing us: {costText(issue.cost)}</span> : null}
           </div>
         ) : null}
       </div>
@@ -348,6 +349,10 @@ function QuickActions({ issue, busy, run }: { issue: IssueDetail; busy: boolean;
             <p className="text-xs text-muted">
               {p.warehouse} · {p.courier} · {when(p.slotStart)}
             </p>
+            <p className={clsx("text-xs", p.slotInHours ? "text-ink-2" : "font-medium text-flag-red")}>
+              Vendor open {p.hours}
+              {p.slotInHours ? " · slot is inside these hours" : " · slot is outside these hours"}
+            </p>
             {p.canSwitch ? (
               <Action icon={<ArrowRightLeft size={15} />} onClick={() => setOpen(open === "switch" ? null : "switch")}>
                 Switch courier for these parcels
@@ -380,6 +385,16 @@ function QuickActions({ issue, busy, run }: { issue: IssueDetail; busy: boolean;
               </form>
             ) : null}
           </>
+        ) : null}
+        {issue.order ? (
+          <Link href={`/orders/${issue.order.id}`} className="flex h-10 items-center gap-2 rounded-lg border border-line px-3 text-[13px] font-medium text-ink-2 hover:bg-page">
+            <FileText size={15} /> Open order #{issue.order.orderNumber} to book it
+          </Link>
+        ) : null}
+        {issue.about?.kind === "courier" ? (
+          <Link href="/settings" className="flex h-10 items-center gap-2 rounded-lg border border-line px-3 text-[13px] font-medium text-ink-2 hover:bg-page">
+            <FileText size={15} /> {issue.about.label}: connection and on/off switch
+          </Link>
         ) : null}
         {issue.shipment ? (
           <Link href={`/orders/${issue.shipment.orderId}`} className="flex h-10 items-center gap-2 rounded-lg border border-line px-3 text-[13px] font-medium text-ink-2 hover:bg-page">

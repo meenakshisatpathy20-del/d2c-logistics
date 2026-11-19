@@ -6,6 +6,10 @@ import { PrismaService } from '../prisma/prisma.service.js';
 
 const HOUR = 60 * 60 * 1000;
 export const NO_SCAN_HOURS = 48;
+/** Picked up but no hub scan within a day: the parcel may still be with the executive. */
+export const NOT_AT_HUB_HOURS = 24;
+/** No scan for a week: treat as lost and start the claim. */
+export const LIKELY_LOST_DAYS = 7;
 const ACTIVE = ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'NDR', 'RTO_INITIATED'] as const;
 type Status = (typeof ACTIVE)[number] | 'DELIVERED' | 'RTO_DELIVERED';
 
@@ -86,7 +90,7 @@ export class TrackingService {
           },
         });
         // A new scan clears a "no scan" flag.
-        await this.resolve(s.id, ['NO_SCAN_48H'], now, status === 'DELIVERED' ? 'Delivered' : 'Moving again');
+        await this.resolve(s.id, ['NO_SCAN_48H', 'NOT_AT_HUB'], now, status === 'DELIVERED' ? 'Delivered' : 'Moving again');
       }
 
       if (status === 'NDR') {
@@ -110,16 +114,24 @@ export class TrackingService {
         });
       }
       if (status === 'RTO_DELIVERED' || status === 'DELIVERED') {
-        await this.resolve(s.id, ['RTO', 'NDR', 'NO_SCAN_48H'], now, status === 'DELIVERED' ? 'Delivered' : 'Returned to seller');
+        await this.resolve(s.id, ['RTO', 'NDR', 'NO_SCAN_48H', 'NOT_AT_HUB'], now, status === 'DELIVERED' ? 'Delivered' : 'Returned to seller');
       }
 
       const silentHours = (now.getTime() - lastScanAt.getTime()) / HOUR;
-      if ((status === 'PICKED_UP' || status === 'IN_TRANSIT') && silentHours >= NO_SCAN_HOURS) {
+      // Picked up but never reached the hub: a day is enough to ask. In transit: two days.
+      const silent =
+        status === 'PICKED_UP' && silentHours >= NOT_AT_HUB_HOURS
+          ? { type: 'NOT_AT_HUB', what: (h: number) => `Not at the hub ${h} hours after pickup` }
+          : status === 'IN_TRANSIT' && silentHours >= NO_SCAN_HOURS
+            ? { type: 'NO_SCAN_48H', what: (h: number) => `No scan for ${h} hours` }
+            : null;
+      if (silent) {
         const lastPlace = place(fresh.at(-1)?.location ?? last.location ?? '');
-        await this.raise(brandId, s.id, 'NO_SCAN_48H', 'CRITICAL', 'OPS', {
-          title: `No scan for ${Math.floor(silentHours)} hours`,
+        const lost = silentHours >= LIKELY_LOST_DAYS * 24;
+        await this.raise(brandId, s.id, silent.type, 'CRITICAL', 'OPS', {
+          title: lost ? `No scan for ${Math.floor(silentHours / 24)} days: likely lost` : silent.what(Math.floor(silentHours)),
           message: `${s.courier.name} · last seen at ${lastPlace} · ${s.order.city}`,
-          action: 'Send RCA to courier',
+          action: lost ? 'Raise a lost claim' : 'Send RCA to courier',
           dueAt: new Date(now.getTime() + 4 * HOUR),
           now,
         });
@@ -141,7 +153,15 @@ export class TrackingService {
     const open = await this.prisma.redFlag.findFirst({ where: { type, shipmentId, resolvedAt: null } });
     if (open) {
       // Keep the hours count current on an open "no scan" flag.
-      if (open.title !== f.title) await this.prisma.redFlag.update({ where: { id: open.id }, data: { title: f.title } });
+      if (open.title !== f.title) {
+        const nowLost = f.title.includes('likely lost') && !open.title.includes('likely lost');
+        await this.prisma.redFlag.update({ where: { id: open.id }, data: { title: f.title, ...(nowLost ? { action: f.action, severity: 'CRITICAL' } : {}) } });
+        if (nowLost) {
+          await this.prisma.issueEvent.create({
+            data: { flagId: open.id, kind: 'SYSTEM', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `${LIKELY_LOST_DAYS} days without a scan: treat it as lost. Ask the courier to declare it lost and raise the claim.`, createdAt: f.now },
+          });
+        }
+      }
       return;
     }
     const owner = await this.brands.ownerFor(role);

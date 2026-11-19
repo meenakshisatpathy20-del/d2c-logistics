@@ -4,6 +4,19 @@ import { AlertsService } from '../alerts/alerts.service.js';
 import { IssuesService } from '../issues/issues.service.js';
 import { PickupsService } from '../pickups/pickups.service.js';
 import { TrackingService } from '../tracking/tracking.service.js';
+import { WatchdogService } from './watchdog.service.js';
+
+/**
+ * Heartbeat of the job loop, read by /api/health. If the loop stops (crash,
+ * host asleep), health says so, so an uptime monitor can wake the team.
+ */
+export const heartbeat: { startedAt: Date; lastRunAt: Date | null; lastOkAt: Date | null; lastError: string | null; lastMs: number | null } = {
+  startedAt: new Date(),
+  lastRunAt: null,
+  lastOkAt: null,
+  lastError: null,
+  lastMs: null,
+};
 
 /**
  * Runs the pickup rules and tracking sync on a timer, so nobody has to remember
@@ -19,6 +32,7 @@ export class JobsService implements OnApplicationBootstrap {
     private readonly tracking: TrackingService,
     private readonly alerts: AlertsService,
     private readonly issues: IssuesService,
+    private readonly watchdog: WatchdogService,
   ) {}
 
   /**
@@ -33,11 +47,17 @@ export class JobsService implements OnApplicationBootstrap {
   async tick() {
     if (process.env.JOBS_ENABLED === 'false' || this.running) return;
     this.running = true;
+    const started = Date.now();
+    heartbeat.lastRunAt = new Date(started);
     try {
       await this.runOnce(new Date());
+      heartbeat.lastOkAt = new Date();
+      heartbeat.lastError = null;
     } catch (e) {
+      heartbeat.lastError = (e as Error).message?.slice(0, 300) ?? 'Job failed';
       this.log.error(e);
     } finally {
+      heartbeat.lastMs = Date.now() - started;
       this.running = false;
     }
   }
@@ -45,10 +65,12 @@ export class JobsService implements OnApplicationBootstrap {
   async runOnce(now: Date) {
     const pickups = await this.pickups.run(now);
     const tracking = await this.tracking.sync(now);
+    // Every open order and parcel against its deadline.
+    const watchdog = await this.watchdog.run(now);
     // After the rules: alert owners of new problems, escalate overdue ones, daily messages.
     // New red flags become issue rooms first, so their owners are alerted with the room's link.
     const issues = await this.issues.run(now);
     const alerts = await this.alerts.run(now);
-    return { pickups, tracking, issues, alerts };
+    return { pickups, tracking, watchdog, issues, alerts };
   }
 }

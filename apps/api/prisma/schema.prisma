@@ -98,6 +98,11 @@ model Warehouse {
   contactPhone  String
   cluster       String? // pickup cluster, e.g. "Mumbai West - Malad"
   isRtoLocation Boolean  @default(true)
+  // Declared working hours (IST, whole hours). Pickup slots fall inside them, and a
+  // courier's "warehouse closed" claim inside them is checked against them.
+  opensAt          Int      @default(10)
+  closesAt         Int      @default(19)
+  saturdayClosesAt Int?     @default(16) // null = closed on Saturday
   createdAt     DateTime @default(now())
 
   pickupOrders Order[]  @relation("PickupWarehouse")
@@ -120,6 +125,12 @@ model Courier {
   mode      CourierMode @default(DEMO)
   active    Boolean     @default(true)
   isBackup  Boolean     @default(false)
+  // Connection health: last booking that worked, last that failed and why.
+  lastBookedAt  DateTime?
+  lastFailedAt  DateTime?
+  lastError     String?
+  failures24h   Int       @default(0)
+  simulateError String? // demo only: makes every booking with this courier fail with this message
   createdAt DateTime    @default(now())
 
   shipments Shipment[]
@@ -188,6 +199,7 @@ model Order {
 
   shipments Shipment[]
   messages  Message[]
+  redFlags  RedFlag[]
 
   // Duplicate-booking lock: one order number per brand.
   @@unique([brandId, orderNumber])
@@ -338,6 +350,9 @@ model RedFlag {
   shipment   Shipment?    @relation(fields: [shipmentId], references: [id])
   pickupId   String?
   pickup     Pickup?      @relation(fields: [pickupId], references: [id])
+  orderId    String? // for problems about an order before it has a shipment
+  order      Order?       @relation(fields: [orderId], references: [id])
+  courierCode String? // the courier an account-level issue is about
   type       String // PICKUP_UNCONFIRMED, PICKUP_MISSED, NO_SCAN_48H, NDR, RTO, WEIGHT_DISPUTE, or a raised type
   severity   FlagSeverity
   title      String

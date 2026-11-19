@@ -33,6 +33,12 @@ export class IssuesController {
     return Object.entries(RAISED).map(([key, t]) => ({ key, label: t.label, group: t.group, scope: t.scope }));
   }
 
+  /** What open problems cost right now, per courier: orders held up, COD stuck, days late. */
+  @Get('issues/delay-cost')
+  delayCost() {
+    return this.issues.delayCost();
+  }
+
   @Get('issues/:id')
   detail(@Param('id') id: string) {
     return this.issues.detail(id);

@@ -40,6 +40,8 @@ export interface RateQuote {
   recommended: boolean;
   /** Our team switched this courier off (account on hold, too many misses). */
   switchedOff?: boolean;
+  /** Its last booking failed in the past 30 minutes (e.g. authentication): not recommended. */
+  failingNow?: boolean;
 }
 
 export interface BookingRequest extends RateRequest {

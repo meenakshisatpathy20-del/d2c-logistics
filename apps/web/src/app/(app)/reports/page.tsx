@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Reports" };
 export default function ReportsPage() {
   return (
     <>
-      <PageHeader title="Reports" subtitle="The 9 pm daily summary, delivery outcomes and our brands. Courier scorecards come next." />
+      <PageHeader title="Reports" subtitle="The 9 pm daily summary, what open problems cost per courier, delivery outcomes and our brands." />
       <ReportsView />
     </>
   );
