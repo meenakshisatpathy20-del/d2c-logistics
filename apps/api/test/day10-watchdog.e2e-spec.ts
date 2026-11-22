@@ -259,8 +259,8 @@ describe('Day 10: nothing goes quiet (e2e)', () => {
         data: { brandId: s.brandId, shipmentId: s.id, type: 'DELAYED', severity: 'WARNING', title: '1 day past the delivery date', message: 'test', createdAt: morning },
       });
       await app.get(IssuesService).run(morning);
-      const sent = await prisma.notification.findFirst({ where: { kind: 'ISSUE_OPENED', link: `/issues/${f.id}` } });
-      expect(sent?.channel).toBe('WHATSAPP');
+      const sent = await prisma.notification.findFirst({ where: { kind: 'ISSUE_OPENED', channel: 'SMS', dedupeKey: { startsWith: `opened:${f.id}` } } });
+      expect(sent?.body).toMatch(/Open: .*\/p$/);
       const room = await prisma.redFlag.findUniqueOrThrow({ where: { id: f.id }, include: { events: true } });
       expect(room.events.some((e) => e.body.startsWith('Sent to'))).toBe(true);
       expect(room.reminderCount).toBe(0);

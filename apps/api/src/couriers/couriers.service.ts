@@ -123,16 +123,32 @@ export class CouriersService implements OnModuleInit {
     }));
   }
 
-  /** Pickup on-time % from the courier scorecard (demo values for now). */
-  pickupOnTimePct(code: string): number {
+  /** Earned pickup on-time %, from the scorecards (refreshed with the job loop). */
+  private earned: Record<string, number> = {};
+
+  setEarnedPickupPct(byCode: Record<string, number>) {
+    this.earned = byCode;
+  }
+
+  /** The figure in the contract, used until we have enough history of our own. */
+  contractPickupPct(code: string): number {
     return DEMO_COURIERS.find((p) => p.code === code)?.pickupOnTimePct ?? 90;
+  }
+
+  /** Pickup on-time %: earned from our own pickups when there is enough history, else the contract figure. */
+  pickupOnTimePct(code: string): number {
+    return this.earned[code] ?? this.contractPickupPct(code);
+  }
+
+  pickupPctSource(code: string): 'earned' | 'contract' {
+    return code in this.earned ? 'earned' : 'contract';
   }
 
   /** The courier a missed or unconfirmed pickup moves to: the most reliable one. */
   backupFor(code: string): string {
     const ranked = [...DEMO_COURIERS]
       .filter((p) => p.code !== code && p.zones.length > 1)
-      .sort((a, b) => b.pickupOnTimePct - a.pickupOnTimePct);
+      .sort((a, b) => this.pickupOnTimePct(b.code) - this.pickupOnTimePct(a.code));
     return ranked[0].code;
   }
 
@@ -150,7 +166,7 @@ export class CouriersService implements OnModuleInit {
   compareRates(req: RateRequest): RateQuote[] {
     const quotes = [...this.adapters.values()]
       .map((a) => {
-        const q = a.quote(req);
+        const q = { ...a.quote(req), pickupOnTimePct: this.pickupOnTimePct(a.code), pickupPctSource: this.pickupPctSource(a.code) };
         return this.isActive(a.code) ? q : { ...q, serviceable: false, switchedOff: true };
       })
       .sort(

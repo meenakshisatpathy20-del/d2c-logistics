@@ -490,11 +490,28 @@ model IssueEvent {
   actorName  String
   actorParty String // OURS, COURIER, VENDOR, CUSTOMER, SYSTEM
   body       String
-  via        String? // PLATFORM, WHATSAPP, CALL
+  via        String? // APP (partner app), CALL, EMAIL, IN_PERSON
   promiseAt  DateTime?
+  photoId    String? // proof photo taken in the partner app
   createdAt  DateTime  @default(now())
 
   @@index([flagId, createdAt])
+}
+
+/** Proof photos taken in the partner app (warehouse shutter, parcel, POD), with when and where. */
+model IssuePhoto {
+  id           String   @id @default(cuid())
+  brandId      String
+  flagId       String
+  mime         String
+  data         Bytes
+  sizeBytes    Int
+  uploadedById String?
+  lat          Float?
+  lng          Float?
+  createdAt    DateTime @default(now())
+
+  @@index([flagId])
 }
 
 /// Named people at each courier, so every issue reaches a person, not a group.

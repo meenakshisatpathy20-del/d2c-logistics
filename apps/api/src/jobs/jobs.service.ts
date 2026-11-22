@@ -4,6 +4,7 @@ import { AlertsService } from '../alerts/alerts.service.js';
 import { IssuesService } from '../issues/issues.service.js';
 import { PickupsService } from '../pickups/pickups.service.js';
 import { TrackingService } from '../tracking/tracking.service.js';
+import { ScorecardsService } from '../couriers/scorecards.service.js';
 import { WatchdogService } from './watchdog.service.js';
 
 /**
@@ -33,7 +34,10 @@ export class JobsService implements OnApplicationBootstrap {
     private readonly alerts: AlertsService,
     private readonly issues: IssuesService,
     private readonly watchdog: WatchdogService,
+    private readonly scorecards: ScorecardsService,
   ) {}
+
+  private scoredAt = 0;
 
   /**
    * On a free host the server sleeps when idle. Running once at start-up catches
@@ -69,6 +73,11 @@ export class JobsService implements OnApplicationBootstrap {
     const watchdog = await this.watchdog.run(now);
     // After the rules: alert owners of new problems, escalate overdue ones, daily messages.
     // New red flags become issue rooms first, so their owners are alerted with the room's link.
+    // Scorecards every 10 minutes: the earned pickup figures feed "Recommended" at booking.
+    if (now.getTime() - this.scoredAt >= 10 * 60_000 || now.getTime() < this.scoredAt) {
+      await this.scorecards.refresh(now);
+      this.scoredAt = now.getTime();
+    }
     const issues = await this.issues.run(now);
     const alerts = await this.alerts.run(now);
     return { pickups, tracking, watchdog, issues, alerts };

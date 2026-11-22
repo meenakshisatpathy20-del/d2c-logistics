@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Header, HttpCode, Param, Patch, Post, Query, Req, StreamableFile } from '@nestjs/common';
 import type { z } from 'zod';
 import type { SessionUser } from '../auth/auth.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
@@ -31,6 +31,14 @@ export class IssuesController {
   @Get('issues/types')
   types() {
     return Object.entries(RAISED).map(([key, t]) => ({ key, label: t.label, group: t.group, scope: t.scope }));
+  }
+
+  /** A proof photo from the partner app, for our team. */
+  @Get('issues/photos/:id')
+  @Header('Cache-Control', 'private, max-age=3600')
+  async photo(@Param('id') id: string) {
+    const p = await this.issues.photo(id);
+    return new StreamableFile(p.data, { type: p.mime });
   }
 
   /** What open problems cost right now, per courier: orders held up, COD stuck, days late. */

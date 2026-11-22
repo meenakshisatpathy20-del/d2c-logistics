@@ -15,6 +15,12 @@ export function isDemoVendorPhone(phone: string): boolean {
   return /^98000000\d\d$/.test(phone) || extra.includes(phone);
 }
 
+/** Seeded demo courier contacts use 97000xxxxx; DEMO_PARTNER_PHONES can list more. */
+export function isDemoPartnerPhone(phone: string): boolean {
+  const extra = (process.env.DEMO_PARTNER_PHONES ?? '').split(',').map((p) => p.trim()).filter(Boolean);
+  return /^97000\d{5}$/.test(phone) || extra.includes(phone);
+}
+
 export function maskEmail(email: string): string {
   const [name, domain] = email.split('@');
   return `${name.slice(0, 2)}${'•'.repeat(Math.max(1, name.length - 2))}@${domain}`;
@@ -46,7 +52,7 @@ export class AuthService {
 
   /**
    * Vendor partners sign in on their phone with mobile number + one-time code
-   * (no password), from the link in their 9 am WhatsApp message.
+   * (no password), from the link in their 9 am SMS.
    */
   async vendorLogin(phone: string, ip: string, now = new Date()) {
     if (!this.loginLimit.hit(`${ip}:${phone}`, now.getTime())) {
@@ -58,6 +64,32 @@ export class AuthService {
     // code shows on screen, which is safe only for demo numbers, never for a real vendor's.
     if ((process.env.OTP_DELIVERY ?? 'demo') === 'demo' && !isDemoVendorPhone(phone)) {
       throw new HttpException('Vendor sign-in by SMS starts once SMS is connected. Until then, only demo vendor numbers can sign in.', HttpStatus.SERVICE_UNAVAILABLE);
+    }
+    return this.challenge(user.id, `+91 ${phone.slice(0, 2)}••••••${phone.slice(-2)}`, now);
+  }
+
+  /**
+   * Courier staff (pickup lead, hub, account manager) sign in to the partner app
+   * with the mobile number our team saved in Settings → Courier contacts.
+   * Their login is made the first time they sign in.
+   */
+  async partnerLogin(phone: string, ip: string, now = new Date()) {
+    if (!this.loginLimit.hit(`${ip}:${phone}`, now.getTime())) {
+      throw new HttpException('Too many attempts. Try again in 15 minutes.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const contact = await this.prisma.courierContact.findFirst({ where: { phone, active: true }, orderBy: { createdAt: 'asc' } });
+    if (!contact) throw new UnauthorizedException('This number is not on our courier contact list. Ask D2C operations to add it.');
+    if ((process.env.OTP_DELIVERY ?? 'demo') === 'demo' && !isDemoPartnerPhone(phone)) {
+      throw new HttpException('Sign-in by SMS starts once SMS is connected. Until then, only demo numbers can sign in.', HttpStatus.SERVICE_UNAVAILABLE);
+    }
+    let user = await this.prisma.user.findUnique({ where: { brandId_phone: { brandId: contact.brandId, phone } } });
+    if (user && user.role !== 'COURIER') throw new UnauthorizedException('This number belongs to a team or vendor login. Use that sign-in.');
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: { brandId: contact.brandId, name: contact.name, phone, role: 'COURIER', courierCode: contact.courierCode, createdAt: now },
+      });
+    } else if (!user.active) {
+      throw new UnauthorizedException('This login is switched off. Ask D2C operations.');
     }
     return this.challenge(user.id, `+91 ${phone.slice(0, 2)}••••••${phone.slice(-2)}`, now);
   }

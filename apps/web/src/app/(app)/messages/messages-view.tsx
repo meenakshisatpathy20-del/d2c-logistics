@@ -28,7 +28,7 @@ export function MessagesView() {
   return (
     <>
       <div className="mb-4 rounded-xl border border-dashed border-brand-amber bg-brand-amber-soft px-4 py-3 text-[13px] text-[#b54708]">
-        <span className="font-semibold">Demo mode:</span> WhatsApp (Meta approval), SMS (DLT registration) and email are not connected yet, so messages are
+        <span className="font-semibold">Demo mode:</span> SMS (DLT registration) and email are not connected yet, so messages are
         kept here exactly as they would be sent. Once the accounts are approved they go out for real, with no other change.
       </div>
       <Card className="overflow-hidden">

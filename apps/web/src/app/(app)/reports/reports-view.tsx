@@ -1,10 +1,11 @@
 "use client";
 
 import { Loader2, Send } from "lucide-react";
-import { useState } from "react";
+import Link from "next/link";
+import { useCallback, useState } from "react";
 import { useShell } from "@/components/shell/app-shell";
 import { Card, DemoBadge } from "@/components/ui/primitives";
-import { getDelayCost, getLatestSummary, getOrders, getToday, sendSummaryNow, type Summary } from "@/lib/api";
+import { getDelayCost, getLatestSummary, getScorecards, getOrders, getToday, sendSummaryNow, type Summary } from "@/lib/api";
 import { formatINR } from "@/lib/format";
 import { useLive } from "@/lib/use-live";
 
@@ -19,6 +20,7 @@ export function ReportsView() {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <DailySummaryCard />
+      <ScorecardsCard />
       <DelayCostCard />
       <Card className="p-5">
         <h2 className="text-[15px] font-semibold text-ink">Delivery outcome</h2>
@@ -60,6 +62,87 @@ export function ReportsView() {
       </Card>
     </div>
   );
+}
+
+/** Earned from what happened, not typed in. The pickup figure decides "Recommended" at booking. */
+function ScorecardsCard() {
+  const [days, setDays] = useState<7 | 30 | 90>(30);
+  const load = useCallback(() => getScorecards(days), [days]);
+  const { data } = useLive(load, 60_000);
+  const rows = [...(data ?? [])].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  return (
+    <Card className="p-5 lg:col-span-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-[15px] font-semibold text-ink">Courier scorecards</h2>
+          <p className="mt-0.5 text-[13px] text-muted">From our own pickups, deliveries and issues. Pickups on time decides &ldquo;Recommended&rdquo; when booking.</p>
+        </div>
+        <div className="flex rounded-lg border border-line p-0.5 text-[12.5px]">
+          {([7, 30, 90] as const).map((d) => (
+            <button key={d} onClick={() => setDays(d)} className={`rounded-md px-2.5 py-1 font-medium ${days === d ? "bg-navy text-white" : "text-ink-2"}`}>
+              {d} days
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[860px] text-[13px]">
+          <thead className="text-left text-xs text-muted">
+            <tr>
+              <th className="py-1.5">Courier</th>
+              <th className="py-1.5 text-right">Score</th>
+              <th className="py-1.5 text-right">Pickups on time</th>
+              <th className="py-1.5 text-right">Delivered on time</th>
+              <th className="py-1.5 text-right">Failed deliveries</th>
+              <th className="py-1.5 text-right">Returns</th>
+              <th className="py-1.5 text-right">Answered in 2 h</th>
+              <th className="py-1.5 text-right">Reminders ignored</th>
+              <th className="py-1.5 text-right">Promises broken</th>
+              <th className="py-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => (
+              <tr key={c.code} className="border-t border-line">
+                <td className="py-2 font-medium text-ink">
+                  {c.name}
+                  {!c.active ? <span className="ml-1.5 text-xs font-normal text-flag-red">switched off</span> : null}
+                </td>
+                <td className={`py-2 text-right font-semibold tabular-nums ${c.score === null ? "text-faint" : c.score < 70 ? "text-flag-red" : c.score < 85 ? "text-[#b54708]" : "text-[#0e6e05]"}`}>{c.score ?? "–"}</td>
+                <Pct v={c.pickups.pct} n={c.pickups.due} bad={85} />
+                <Pct v={c.deliveries.pct} n={c.deliveries.done} bad={85} />
+                <Pct v={c.failedDeliveryPct} high={20} />
+                <Pct v={c.rtoPct} high={15} />
+                <Pct v={c.issues.answerPct} n={c.issues.askedOfThem} bad={80} />
+                <Num v={c.issues.remindersIgnored} warn={3} />
+                <Num v={c.issues.promisesBroken} warn={1} />
+                <td className="py-2 text-right">
+                  <Link href={`/reports/couriers/${c.code}`} className="text-[12.5px] font-medium text-brand-blue hover:underline">
+                    Review pack
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-muted">&ldquo;–&rdquo; = fewer than 5 to judge by yet; booking then uses the contract figure.</p>
+    </Card>
+  );
+}
+
+function Pct({ v, n, bad, high }: { v: number | null; n?: number; bad?: number; high?: number }) {
+  const red = v !== null && ((bad !== undefined && v < bad) || (high !== undefined && v > high));
+  return (
+    <td className={`py-2 text-right tabular-nums ${red ? "font-semibold text-flag-red" : ""}`}>
+      {v === null ? <span className="text-faint">–</span> : `${v}%`}
+      {n !== undefined && v !== null ? <span className="ml-1 text-xs font-normal text-faint">of {n}</span> : null}
+    </td>
+  );
+}
+
+function Num({ v, warn }: { v: number; warn: number }) {
+  return <td className={`py-2 text-right tabular-nums ${v >= warn ? "font-semibold text-flag-red" : ""}`}>{v || "–"}</td>;
 }
 
 /** Open problems in money, per courier: what is held up, COD not collected, and how they answer. */
@@ -134,7 +217,7 @@ function DailySummaryCard() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-[15px] font-semibold text-ink">Daily summary {data ? <span className="font-normal text-muted">· {data.day}</span> : null}</h2>
-          <p className="mt-0.5 text-[13px] text-muted">Sent to management every day at 9 pm on WhatsApp and email.</p>
+          <p className="mt-0.5 text-[13px] text-muted">Sent to management every day at 9 pm in the app and by email.</p>
         </div>
         <span className="flex items-center gap-2">
           <DemoBadge />

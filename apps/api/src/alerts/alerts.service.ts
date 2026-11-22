@@ -10,7 +10,7 @@ export const ESCALATION_STEPS_HOURS = [0, 2, 4];
 export const SUMMARY_HOUR = 21; // 9 pm IST
 export const VENDOR_LIST_HOUR = 9; // 9 am IST
 
-type Channel = 'APP' | 'WHATSAPP' | 'SMS' | 'EMAIL';
+type Channel = 'APP' | 'SMS' | 'EMAIL';
 type Send = {
   brandId: string;
   userId?: string | null;
@@ -24,18 +24,22 @@ type Send = {
   now: Date;
 };
 
-/** Links in WhatsApp, SMS and email must be full addresses; Render sets RENDER_EXTERNAL_URL itself. */
+/** Links in SMS and email must be full addresses; Render sets RENDER_EXTERNAL_URL itself. */
 export const fullLink = (path: string) => `${(process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? '').replace(/\/$/, '')}${path}`;
+
+/** SMS stays plain text: no emoji (they double the SMS cost and read as spam). */
+const plain = (t: string) => t.replace(/\p{Extended_Pictographic}\uFE0F?\s*/gu, '').trim();
 
 const inr = (n: number) => `Rs ${Math.round(n).toLocaleString('en-IN')}`;
 
 /**
  * Alerts reach people where they are, so nobody has to keep a dashboard open:
- *  - a new problem goes to its owner (app bell + WhatsApp) with a link to it;
+ *  - a new problem goes to its owner (app bell + an SMS link) with a link to it;
  *  - past its deadline it climbs the ladder: manager, courier account manager, founder;
  *  - at 9 pm management gets the daily summary; at 9 am each vendor gets its pickups.
- * Until WhatsApp/SMS/email accounts are approved, outside messages are kept
- * in the outbox marked DEMO, exactly as they would be sent.
+ * WhatsApp is not used. The work happens on the platform; SMS and email only
+ * carry a link to it. Until SMS/email are connected, those are kept in the
+ * outbox marked DEMO, exactly as they would be sent.
  */
 @Injectable()
 export class AlertsService {
@@ -81,7 +85,33 @@ export class AlertsService {
     }
   }
 
-  /** App bell + WhatsApp for one team member. */
+  /**
+   * A partner (courier contact, vendor) or customer: the alert lands in their
+   * own login when they have one, and an SMS carries only the link to it,
+   * never the conversation. Returns true if anything new was sent.
+   */
+  async notify(m: { brandId: string; phone: string | null; name: string; kind: string; title: string; body: string; link?: string; dedupeKey: string; now: Date }) {
+    const user = m.phone ? await this.prisma.user.findFirst({ where: { brandId: m.brandId, phone: m.phone, active: true } }) : null;
+    const app = user
+      ? await this.send({ brandId: m.brandId, userId: user.id, channel: 'APP', to: user.name, kind: m.kind, title: m.title, body: m.body, link: m.link, dedupeKey: `${m.dedupeKey}:app`, now: m.now })
+      : false;
+    const sms = m.phone
+      ? await this.send({
+          brandId: m.brandId,
+          channel: 'SMS',
+          to: `+91 ${m.phone}`,
+          kind: m.kind,
+          title: m.title,
+          body: `D2C Logistics: ${plain(m.title)}.${m.link ? ` Open: ${fullLink(m.link)}` : ''}`,
+          link: m.link,
+          dedupeKey: `${m.dedupeKey}:sms`,
+          now: m.now,
+        })
+      : false;
+    return app || sms;
+  }
+
+  /** App bell + an SMS link for one team member. */
   private async toPerson(
     brandId: string,
     user: { id: string; name: string; phone: string },
@@ -91,13 +121,13 @@ export class AlertsService {
     await this.send({
       brandId,
       userId: user.id,
-      channel: 'WHATSAPP',
+      channel: 'SMS',
       to: `+91 ${user.phone}`,
       kind: m.kind,
       title: m.title,
-      body: `${m.body}${m.link ? `\nOpen: ${fullLink(m.link)}` : ''}`,
+      body: `D2C Logistics: ${plain(m.title)}.${m.link ? ` Open: ${fullLink(m.link)}` : ''}`,
       link: m.link,
-      dedupeKey: `${m.key}:wa`,
+      dedupeKey: `${m.key}:sms`,
       now: m.now,
     });
     return app;
@@ -178,14 +208,14 @@ export class AlertsService {
               (f.courierContactId ? await this.prisma.courierContact.findUnique({ where: { id: f.courierContactId } }) : null) ??
               (await this.prisma.courierContact.findFirst({ where: { brandId, courierCode: courier.code, role: 'ACCOUNT_MANAGER', active: true } }));
             to = am ? `${am.name} (${courier.name} account manager)` : `${courier.name} account manager (no contact added)`;
-            await this.send({
+            await this.notify({
               brandId,
-              channel: 'WHATSAPP',
-              to: am ? `+91 ${am.phone}` : to,
+              phone: am?.phone ?? null,
+              name: to,
               kind: 'ESCALATION',
               title: `Escalation: ${what}`,
-              body: `${am ? `Hi ${am.name.replace(/ \(demo\)$/, '')}, ` : ''}${f.title}${f.shipment ? ` · AWB ${f.shipment.awb}` : ''}\n${f.message}\nThis is ${lateText}. Please reply with the reason (RCA), a name and a time. Your reply is recorded on the issue.\nD2C Ecommerce India`,
-              link,
+              body: `${f.title}${f.shipment ? ` · AWB ${f.shipment.awb}` : ''}\n${f.message}\nThis is ${lateText}. Reply in the partner app with the reason (RCA), a name and a time.`,
+              link: '/p',
               dedupeKey: `esc:${f.id}:2:${round}`,
               now,
             });
@@ -286,7 +316,7 @@ export class AlertsService {
     return { summary, sent: true };
   }
 
-  /** At 9 am each vendor gets today's pickup list on WhatsApp, with a link to its phone view. */
+  /** At 9 am each vendor gets today's pickup list in its login, with an SMS link to it. */
   private async vendorPickupLists(now: Date) {
     if (closedReason(now)) return 0;
     const brandId = await this.brands.currentBrandId();
@@ -306,7 +336,7 @@ export class AlertsService {
         ...list.map((p) => `• ${slotLabel(p.slotStart)} · ${p.courier.name} · ${p.parcelCount} parcel${p.parcelCount === 1 ? '' : 's'}`),
         'Please pack, add photos and mark "packed and ready".',
       ].join('\n');
-      if (await this.send({ brandId, channel: 'WHATSAPP', to: `+91 ${w.contactPhone}`, kind: 'VENDOR_PICKUPS', title: `Pickups today · ${w.name}`, body: `${body}\nOpen: ${fullLink('/v')}`, link: '/v', dedupeKey: `vendor9am:${w.id}:${day}`, now }))
+      if (await this.notify({ brandId, phone: w.contactPhone, name: w.contactName, kind: 'VENDOR_PICKUPS', title: `Pickups today · ${w.name}`, body, link: '/v', dedupeKey: `vendor9am:${w.id}:${day}`, now }))
         n++;
     }
     return n;

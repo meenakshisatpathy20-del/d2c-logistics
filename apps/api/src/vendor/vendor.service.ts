@@ -86,13 +86,13 @@ export class VendorService {
     const brandId = await this.brands.currentBrandId();
     // Tell the vendor (when our team moved it) and the owner of pickups (when the vendor did).
     if (actor.role !== 'VENDOR') {
-      await this.alerts.send({
+      await this.alerts.notify({
         brandId,
-        channel: 'WHATSAPP',
-        to: `+91 ${res.warehouse.contactPhone}`,
+        phone: res.warehouse.contactPhone,
+        name: res.warehouse.name,
         kind: 'PICKUP_POSTPONED',
         title: `Pickup moved · ${res.warehouse.name}`,
-        body: `Your ${res.slot} ${res.courier} pickup moved to ${res.movedTo}. Reason: ${reason}\nOpen: ${fullLink('/v')}`,
+        body: `Your ${res.slot} ${res.courier} pickup moved to ${res.movedTo}. Reason: ${reason}`,
         link: '/v',
         dedupeKey: `postpone:${pickupId}:vendor`,
         now,

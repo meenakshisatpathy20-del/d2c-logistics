@@ -36,6 +36,8 @@ export interface RateQuote {
   etaDays: number;
   /** Share of pickups done in the agreed slot, from the courier scorecard. */
   pickupOnTimePct: number;
+  /** earned = from our own pickups; contract = not enough history yet. */
+  pickupPctSource?: 'earned' | 'contract';
   /** Set by the comparison: the cheapest reliable courier for this parcel. */
   recommended: boolean;
   /** Our team switched this courier off (account on hold, too many misses). */

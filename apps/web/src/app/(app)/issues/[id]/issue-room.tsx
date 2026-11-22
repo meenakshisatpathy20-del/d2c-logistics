@@ -20,22 +20,25 @@ import Link from "next/link";
 import { type ReactNode, useCallback, useState } from "react";
 import { costText, IssueChips, PARTY_NAME, PARTY_TONE, WaitingOn } from "@/components/issues/issue-bits";
 import { Badge, Button, Card, Field, inputClass } from "@/components/ui/primitives";
-import { actOnIssue, getIssue, type IssueAction, type IssueDetail, type Party } from "@/lib/api";
+import { issuePhotoUrl, actOnIssue, getIssue, type IssueAction, type IssueDetail, type Party } from "@/lib/api";
 import { useLive } from "@/lib/use-live";
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 
 const VIA: Record<string, { label: string; icon: typeof Phone }> = {
-  WHATSAPP: { label: "WhatsApp", icon: MessageCircle },
+  WHATSAPP: { label: "WhatsApp (old)", icon: MessageCircle },
   CALL: { label: "Call", icon: PhoneCall },
   EMAIL: { label: "Email", icon: Mail },
-  PLATFORM: { label: "On the platform", icon: Smartphone },
+  IN_PERSON: { label: "In person", icon: PhoneCall },
+  PLATFORM: { label: "In the app", icon: Smartphone },
+  APP: { label: "In the app", icon: Smartphone },
 };
 
 const KIND_LABEL: Record<string, string> = {
   ASK: "Asked",
   PARTNER_REPLY: "Replied",
+  PHOTO: "Photo",
   CALL_NOTE: "Call note",
   REMINDER: "Reminder",
   PROMISE_BROKEN: "Promise missed",
@@ -143,6 +146,12 @@ export function IssueRoom({ id }: { id: string }) {
                         <span className="ml-auto text-xs text-faint">{when(e.at)}</span>
                       </div>
                       <p className="mt-0.5 whitespace-pre-line text-[13.5px] text-ink-2">{e.body}</p>
+                      {e.photoId ? (
+                        <a href={issuePhotoUrl(e.photoId)} target="_blank" rel="noreferrer">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={issuePhotoUrl(e.photoId)} alt="Proof photo" className="mt-2 max-h-48 rounded-lg border border-line" />
+                        </a>
+                      ) : null}
                       {e.promiseAt ? (
                         <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-blue-soft px-2 py-0.5 text-[11.5px] font-semibold text-brand-blue">
                           Promised by {when(e.promiseAt)}
@@ -192,7 +201,7 @@ function Composer({ issue, busy, run }: { issue: IssueDetail; busy: boolean; run
   const [tab, setTab] = useState<Tab>("reply");
   const [text, setText] = useState("");
   const [party, setParty] = useState<Exclude<Party, "OURS">>(issue.waitingOn === "OURS" ? (issue.pickup ? "COURIER" : "COURIER") : (issue.waitingOn as Exclude<Party, "OURS">));
-  const [via, setVia] = useState<"WHATSAPP" | "CALL" | "EMAIL">("WHATSAPP");
+  const [via, setVia] = useState<"CALL" | "EMAIL" | "IN_PERSON">("CALL");
   const [promise, setPromise] = useState("");
   const [nextBy, setNextBy] = useState<Party>("COURIER");
   const [outcome, setOutcome] = useState(issue.outcomes[0]);
@@ -247,9 +256,9 @@ function Composer({ issue, busy, run }: { issue: IssueDetail; busy: boolean; run
         }}
       >
         <p className="text-xs text-muted">
-          {tab === "reply" && "A reply that came on WhatsApp, a call or email: log it here so it counts on the record. A reply with a time becomes a promise we track."}
+          {tab === "reply" && "Partners answer in their own app. A reply that came on a call, by email or in person: log it here so it counts on the record. A reply with a time becomes a promise we track."}
           {tab === "call" && "After any call: what was agreed, who does the next step, and by when."}
-          {tab === "ask" && "Sends them a WhatsApp with a link to this issue. The turn passes to them and reminders go out by themselves."}
+          {tab === "ask" && "Lands in their partner app (vendor or courier), with an SMS link to it. The turn passes to them and reminders go out by themselves."}
           {tab === "note" && "Seen by our team only."}
           {tab === "solve" && "Close it on what actually happened, and who was at fault. It counts on that side's scorecard."}
         </p>
@@ -263,9 +272,9 @@ function Composer({ issue, busy, run }: { issue: IssueDetail; busy: boolean; run
             ))}
             {tab === "reply" ? (
               <select value={via} onChange={(e) => setVia(e.target.value as typeof via)} className="h-8 rounded-full border border-line px-3 text-[12.5px]">
-                <option value="WHATSAPP">on WhatsApp</option>
                 <option value="CALL">on a call</option>
                 <option value="EMAIL">by email</option>
+                <option value="IN_PERSON">in person</option>
               </select>
             ) : null}
           </div>

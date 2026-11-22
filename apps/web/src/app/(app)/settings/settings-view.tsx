@@ -75,7 +75,7 @@ export function SettingsView() {
       <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
         <span>
           <span className="block text-[14.5px] font-semibold text-ink">Message log</span>
-          <span className="block text-xs text-muted">Every WhatsApp, SMS and email the platform sent, or keeps as Demo until the accounts are approved.</span>
+          <span className="block text-xs text-muted">Every app alert, SMS link and email the platform sent, or keeps as Demo until SMS and email are connected.</span>
         </span>
         <a href="/messages" className="text-[13px] font-medium text-brand-blue hover:underline">
           Open the log →
@@ -602,7 +602,7 @@ function CourierContactsCard({ couriers, canManage }: { couriers: CourierInfo[];
     <Card>
       <CardTop
         title="Courier contacts"
-        sub="Each issue goes to a named person: the pickup lead for pickups, the account manager for everything else. Two ignored reminders and it goes to their regional manager."
+        sub="Each issue goes to a named person: the pickup lead for pickups, the account manager for everything else. Each signs in to the partner app (/p) with the mobile saved here and answers there; no WhatsApp. Two ignored reminders and it goes to their regional manager."
         action={canManage ? <Button size="sm" variant="secondary" onClick={() => setAdding((v) => !v)}><Plus size={14} /> Add contact</Button> : null}
       />
       {adding ? (

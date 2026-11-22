@@ -82,7 +82,7 @@ describe('Day 7-8: roles, alerts, escalation, summary, vendor view (e2e)', () =>
     await finance.get('/api/payments/summary').expect(200);
   });
 
-  it('the owner of a new problem is alerted once, on the bell and WhatsApp, with a link to it', async () => {
+  it('the owner of a new problem is alerted once, on the bell and an SMS link, with a link to it', async () => {
     const b = await founder.post('/api/shipments').send(order('A1')).expect(201);
     const brand = await prisma.brand.findUniqueOrThrow({ where: { slug: 'd2c' } });
     const ops = await prisma.user.findUniqueOrThrow({ where: { email: 'ops@d2c.demo' } });
@@ -94,8 +94,8 @@ describe('Day 7-8: roles, alerts, escalation, summary, vendor view (e2e)', () =>
     await alerts.run(new Date());
     await alerts.run(new Date());
     const sent = await prisma.notification.findMany({ where: { dedupeKey: { startsWith: `flag:${flag.id}:` } } });
-    expect(sent.map((n) => n.channel).sort()).toEqual(['APP', 'WHATSAPP']);
-    expect(sent.find((n) => n.channel === 'WHATSAPP')?.status).toBe('DEMO');
+    expect(sent.map((n) => n.channel).sort()).toEqual(['APP', 'SMS']);
+    expect(sent.find((n) => n.channel === 'SMS')?.status).toBe('DEMO');
     expect(sent[0].link).toBe(`/issues/${flag.id}`);
 
     const opsAgent = await teamAgent(app, 'ops@d2c.demo');
@@ -124,10 +124,10 @@ describe('Day 7-8: roles, alerts, escalation, summary, vendor view (e2e)', () =>
     await alerts.run(new Date(due.getTime() + 5 * HOUR));
     f = await prisma.redFlag.findUniqueOrThrow({ where: { id: flag.id } });
     expect(f.escalationLevel).toBe(3);
-    expect(await prisma.notification.count({ where: { dedupeKey: { startsWith: `esc:${flag.id}:2:` } } })).toBe(1); // courier email
+    expect(await prisma.notification.count({ where: { channel: 'SMS', dedupeKey: { startsWith: `esc:${flag.id}:2:` } } })).toBe(1); // courier: SMS link (plus their partner app, when they have a login)
     expect(await prisma.notification.count({ where: { dedupeKey: { startsWith: `esc:${flag.id}:3:` }, channel: 'APP' } })).toBe(1);
     await alerts.run(new Date(due.getTime() + 9 * HOUR));
-    expect(await prisma.notification.count({ where: { dedupeKey: { startsWith: `esc:${flag.id}:` } } })).toBe(5);
+    expect(await prisma.notification.count({ where: { channel: 'SMS', dedupeKey: { startsWith: `esc:${flag.id}:` } } })).toBe(3);
 
     // Acting on a problem stops the ladder.
     const flag2 = await prisma.redFlag.create({
@@ -205,7 +205,9 @@ describe('Day 7-8: roles, alerts, escalation, summary, vendor view (e2e)', () =>
     const old = await prisma.pickup.findUniqueOrThrow({ where: { id: before.pickupId! } });
     expect(old.status).toBe('POSTPONED');
     expect(old.postponeReason).toBe('Vendor stock arriving late');
-    expect(await prisma.notification.count({ where: { dedupeKey: `postpone:${before.pickupId}:vendor` } })).toBe(1);
+    expect(await prisma.notification.count({ where: { dedupeKey: `postpone:${before.pickupId}:vendor:sms` } })).toBe(1);
+    // The vendor's own login gets it too (the vendor has an account).
+    expect(await prisma.notification.count({ where: { dedupeKey: `postpone:${before.pickupId}:vendor:app` } })).toBe(1);
     await founder.post(`/api/pickups/${before.pickupId}/postpone`).send({ reason: 'again' }).expect(400);
   });
 

@@ -100,7 +100,7 @@ describe('Day 9: issue rooms (e2e)', () => {
     expect(g.reminderCount).toBe(2);
     expect(g.courierContact!.name).not.toBe(firstContact); // handed to the regional manager
     expect(g.events.some((e) => e.kind === 'ESCALATED')).toBe(true);
-    expect(await prisma.notification.count({ where: { dedupeKey: { startsWith: `remind:${issue.id}:` } } })).toBe(2);
+    expect(await prisma.notification.count({ where: { channel: 'SMS', dedupeKey: { startsWith: `remind:${issue.id}:` } } })).toBe(2);
 
     // Still silent after the manager was told: we stop waiting and move the parcels.
     const before = await prisma.shipment.findFirstOrThrow({ where: { pickupId: f.pickupId! } });
@@ -112,12 +112,12 @@ describe('Day 9: issue rooms (e2e)', () => {
     expect(after.courierCode).not.toBe(before.courierCode);
   });
 
-  it('a logged WhatsApp reply with a time becomes a promise; missing it is counted', async () => {
+  it('a logged call reply with a time becomes a promise; missing it is counted', async () => {
     const { issue } = await pickupIssue('C');
     const promise = new Date(Date.now() + HOUR);
     const r = await founder
       .post(`/api/issues/${issue.id}/act`)
-      .send({ kind: 'partner_reply', party: 'COURIER', via: 'WHATSAPP', body: 'Executive Ramesh will come by 4 pm', promiseAt: promise.toISOString() })
+      .send({ kind: 'partner_reply', party: 'COURIER', via: 'CALL', body: 'Executive Ramesh will come by 4 pm', promiseAt: promise.toISOString() })
       .expect(200);
     expect(r.body.promiseText).toMatch(/Ramesh/);
     expect(r.body.events.at(-1).party).toBe('COURIER');
@@ -208,11 +208,11 @@ describe('Day 9: issue rooms (e2e)', () => {
     expect(again.body.events.at(-1).body).toMatch(/Raised again/);
   });
 
-  it('messages to couriers never carry a link to a page they cannot open', async () => {
+  it('messages to couriers only carry a link to their partner app, never our team pages', async () => {
     const { issue } = await pickupIssue('H');
     await founder.post(`/api/issues/${issue.id}/act`).send({ kind: 'ask', party: 'COURIER', body: 'Please assign an executive' }).expect(200);
-    const sent = await prisma.notification.findFirst({ where: { dedupeKey: { startsWith: `ask:${issue.id}:` } } });
-    expect(sent?.body).toMatch(/Reply to this message/);
+    const sent = await prisma.notification.findFirst({ where: { channel: 'SMS', dedupeKey: { startsWith: `ask:${issue.id}:` } } });
+    expect(sent?.body).toMatch(/Open: .*\/p$/);
     expect(sent?.body).not.toMatch(/\/issues\//);
   });
 });

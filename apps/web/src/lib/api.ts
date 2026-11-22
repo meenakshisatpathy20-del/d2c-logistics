@@ -16,6 +16,7 @@ export type RateQuote = {
   recommended: boolean;
   switchedOff?: boolean;
   failingNow?: boolean;
+  pickupPctSource?: "earned" | "contract";
 };
 
 export type RateRequest = {
@@ -529,7 +530,7 @@ export type IssuesPage = {
   counts: { groups: Partial<Record<IssueGroup, number>>; waiting: Partial<Record<Party, number>> };
   rows: IssueRow[];
 };
-export type IssueEventView = { id: string; kind: string; by: string; party: string; body: string; via: string | null; promiseAt: string | null; at: string };
+export type IssueEventView = { id: string; kind: string; by: string; party: string; body: string; via: string | null; promiseAt: string | null; photoId?: string | null; at: string };
 export type IssueDetail = IssueRow & {
   open: boolean;
   action: string | null;
@@ -561,7 +562,7 @@ export const getDelayCost = () => request<DelayCost>("/api/issues/delay-cost");
 export type IssueAction =
   | { kind: "message"; body: string }
   | { kind: "ask"; party: Exclude<Party, "OURS">; body: string }
-  | { kind: "partner_reply"; party: Exclude<Party, "OURS">; via: "WHATSAPP" | "CALL" | "EMAIL"; body: string; promiseAt?: string }
+  | { kind: "partner_reply"; party: Exclude<Party, "OURS">; via: "CALL" | "EMAIL" | "IN_PERSON"; body: string; promiseAt?: string }
   | { kind: "call_note"; party: Exclude<Party, "OURS">; agreed: string; nextBy: Party; deadline?: string }
   | { kind: "turn"; party: Party }
   | { kind: "reassign"; ownerId: string }
@@ -591,3 +592,99 @@ export function waited(minutes: number): string {
   if (h < 24) return `${h} h ${minutes % 60} m`;
   return `${Math.floor(h / 24)} d ${h % 24} h`;
 }
+
+// ---------- Partner app (courier staff) ----------
+
+export const partnerLogin = (phone: string) =>
+  request<LoginStep>("/api/auth/partner-login", { method: "POST", body: JSON.stringify({ phone }) });
+export type PartnerIssue = {
+  id: string;
+  title: string;
+  message: string;
+  about: string;
+  yourTurn: boolean;
+  assignedToYou: boolean;
+  waitedMinutes: number;
+  reminders: number;
+  promiseAt: string | null;
+  promisesBroken: number;
+};
+export type PartnerPickup = {
+  id: string;
+  warehouse: string;
+  address: string;
+  contact: string;
+  hours: string;
+  slotStart: string;
+  slot: string;
+  status: "SCHEDULED" | "CONFIRMED";
+  parcels: number;
+  packed: number;
+  executive: string | null;
+  canConfirm: boolean;
+};
+export type PartnerHome = {
+  me: { name: string; role: string | null };
+  courier: { code: string; name: string };
+  counts: { yourTurn: number; toConfirm: number };
+  issues: PartnerIssue[];
+  pickups: PartnerPickup[];
+};
+export const getPartnerHome = () => request<PartnerHome>("/api/partner/home");
+export const confirmPartnerPickup = (id: string, executiveName: string, executivePhone: string) =>
+  request<PartnerHome>(`/api/partner/pickups/${id}/confirm`, { method: "POST", body: JSON.stringify({ executiveName, executivePhone }) });
+export type PickupProblem = "CLOSED" | "NOT_READY" | "ADDRESS" | "NO_EXECUTIVE" | "OTHER";
+export const reportPickupProblem = (id: string, p: { reason: PickupProblem; note?: string; dataUrl?: string; lat?: number; lng?: number }) =>
+  request<{ issueId: string }>(`/api/partner/pickups/${id}/problem`, { method: "POST", body: JSON.stringify(p) });
+export type PartnerIssueView = {
+  id: string;
+  title: string;
+  message: string;
+  about: { kind: string; id: string; label: string; sub: string } | null;
+  open: boolean;
+  yourTurn: boolean;
+  waitingOnLabel: string;
+  waitedMinutes: number;
+  reminders: number;
+  promiseAt: string | null;
+  promisesBroken: number;
+  outcome: string | null;
+  pickup: { warehouse: string; slotStart: string; hours: string } | null;
+  shipment: { orderNumber: string; awb: string; city: string; status: string } | null;
+  events: IssueEventView[];
+};
+export const getPartnerIssue = (id: string) => request<PartnerIssueView>(`/api/partner/issues/${id}`);
+export const answerPartnerIssue = (id: string, a: { kind: "PROMISE" | "DONE" | "MESSAGE"; body: string; promiseAt?: string }) =>
+  request<PartnerIssueView>(`/api/partner/issues/${id}/answer`, { method: "POST", body: JSON.stringify(a) });
+export const addPartnerPhoto = (id: string, dataUrl: string, place: { lat?: number; lng?: number } = {}) =>
+  request<{ id: string }>(`/api/partner/issues/${id}/photo`, { method: "POST", body: JSON.stringify({ dataUrl, ...place }) });
+export const partnerPhotoUrl = (id: string) => `${API_URL}/api/partner/photos/${id}`;
+export const issuePhotoUrl = (id: string) => `${API_URL}/api/issues/photos/${id}`;
+
+// ---------- Courier scorecards ----------
+
+export type Scorecard = {
+  code: string;
+  name: string;
+  active: boolean;
+  pickups: { due: number; onTime: number; pct: number | null; missed: number; notConfirmed: number };
+  deliveries: { done: number; onTime: number; pct: number | null };
+  failedDeliveryPct: number | null;
+  rtoPct: number | null;
+  issues: { raised: number; askedOfThem: number; answeredInTime: number; answerPct: number | null; remindersIgnored: number; promisesMade: number; promisesBroken: number; waitingOnThem: number };
+  score: number | null;
+  usedPickupPct: number;
+  usedSource: "earned" | "contract";
+};
+export const getScorecards = (days: 7 | 30 | 90 = 30) => request<Scorecard[]>(`/api/scorecards?days=${days}`);
+export type ReviewPack = {
+  courier: { code: string; name: string };
+  period: { from: string; to: string; days: number };
+  card: Scorecard;
+  pickups: { when: string; vendor: string; slot: string; parcels: number; what: string }[];
+  lateDeliveries: { awb: string; order: string; city: string; promised: string; delivered: string | null; daysLate: number }[];
+  ignored: { id: string; title: string; about: string; reminders: number; open: boolean }[];
+  brokenPromises: { id: string; title: string; about: string; what: string; at: string }[];
+  claims: { id: string; title: string; about: string; withPhoto: boolean; hoursCheck: string | null; outcome: string | null }[];
+};
+export const getReviewPack = (code: string, days: 7 | 30 = 7) => request<ReviewPack>(`/api/scorecards/${code}/review?days=${days}`);

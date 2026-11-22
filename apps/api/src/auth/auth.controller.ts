@@ -48,6 +48,13 @@ export class AuthController {
   }
 
   @Public()
+  @Post('partner-login')
+  @HttpCode(200)
+  partnerLogin(@Body() body: unknown, @Req() req: Req) {
+    return this.auth.partnerLogin(parse(VendorLoginSchema, body).phone, req.ip ?? 'unknown');
+  }
+
+  @Public()
   @Post('verify')
   @HttpCode(200)
   async verify(@Body() body: unknown, @Res({ passthrough: true }) res: Res) {

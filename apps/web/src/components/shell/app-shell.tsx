@@ -71,6 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     getMe().then((m) => {
       // Vendor partners have their own phone view.
       if (m.role === "VENDOR") window.location.replace("/v");
+      if (m.role === "COURIER") window.location.replace("/p");
       else setMe(m);
     }, () => {});
   }, []);

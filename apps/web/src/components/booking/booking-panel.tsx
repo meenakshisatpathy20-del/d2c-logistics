@@ -564,6 +564,7 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
                               <span className={clsx("font-semibold", q.pickupOnTimePct < 85 ? "text-flag-red" : "text-[#0e6e05]")}>
                                 {q.pickupOnTimePct}%
                               </span>
+                              {q.pickupPctSource === "contract" ? <span className="text-faint"> (contract, no history yet)</span> : null}
                             </>
                           ) : q.switchedOff ? (
                             "Switched off by our team"

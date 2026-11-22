@@ -51,8 +51,10 @@ export class PickupsService {
         await this.prisma.pickup.update({ where: { id: p.id }, data: { status: 'CANCELLED' } });
         continue;
       }
-      const pct = this.couriers.pickupOnTimePct(p.courierCode);
-      if (roll(`${p.id}:confirm`) < pct) {
+      const pct = this.couriers.contractPickupPct(p.courierCode); // demo: how the simulated courier behaves
+      // Live: only the courier's own confirmation in the partner app counts (PICKUP_CONFIRM=partner).
+      // Demo: courier staff are simulated by their on-time rate.
+      if (process.env.PICKUP_CONFIRM !== 'partner' && roll(`${p.id}:confirm`) < pct) {
         await this.prisma.pickup.update({
           where: { id: p.id },
           data: { status: 'CONFIRMED', confirmedAt: now, executiveName: EXECUTIVES[roll(p.id) % EXECUTIVES.length] },
@@ -79,7 +81,7 @@ export class PickupsService {
       include: { warehouse: true, courier: true, shipments: { where: { status: { not: 'CANCELLED' } } } },
     });
     for (const p of due) {
-      const pct = this.couriers.pickupOnTimePct(p.courierCode);
+      const pct = this.couriers.contractPickupPct(p.courierCode); // demo: how the simulated courier behaves
       if (roll(`${p.id}:collect`) < pct) {
         const at = new Date(p.slotStart.getTime() + (30 + (roll(`${p.id}:minute`) % 75)) * 60 * 1000);
         await this.prisma.$transaction([

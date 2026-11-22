@@ -37,7 +37,7 @@ export const IssueActionSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('partner_reply'),
     party: z.enum(['COURIER', 'VENDOR', 'CUSTOMER']),
-    via: z.enum(['WHATSAPP', 'CALL', 'EMAIL']),
+    via: z.enum(['CALL', 'EMAIL', 'IN_PERSON']),
     body: z.string().trim().min(2).max(2000),
     promiseAt: when.optional(),
   }),
@@ -75,6 +75,12 @@ export const RaiseSchema = z.object({
 export const VendorReplySchema = z.object({
   kind: z.enum(['READY', 'NOT_READY', 'MESSAGE']),
   body: z.string().trim().max(1000).optional(),
+  promiseAt: when.optional(),
+});
+
+export const CourierAnswerSchema = z.object({
+  kind: z.enum(['PROMISE', 'DONE', 'MESSAGE']),
+  body: z.string().trim().min(2, 'Write a short answer').max(1000),
   promiseAt: when.optional(),
 });
 
@@ -164,9 +170,9 @@ export class IssuesService {
     return contacts.find((c) => c.role === contactRoleFor(type)) ?? contacts.find((c) => c.role === 'ACCOUNT_MANAGER') ?? contacts[0] ?? null;
   }
 
-  private event(flagId: string, e: { kind: string; actorId?: string | null; actorName: string; actorParty: string; body: string; via?: string; promiseAt?: Date | null; at: Date }) {
+  private event(flagId: string, e: { kind: string; actorId?: string | null; actorName: string; actorParty: string; body: string; via?: string; promiseAt?: Date | null; photoId?: string; at: Date }) {
     return this.prisma.issueEvent.create({
-      data: { flagId, kind: e.kind, actorId: e.actorId ?? null, actorName: e.actorName, actorParty: e.actorParty, body: e.body, via: e.via, promiseAt: e.promiseAt ?? null, createdAt: e.at },
+      data: { flagId, kind: e.kind, actorId: e.actorId ?? null, actorName: e.actorName, actorParty: e.actorParty, body: e.body, via: e.via, promiseAt: e.promiseAt ?? null, photoId: e.photoId ?? null, createdAt: e.at },
     });
   }
 
@@ -206,19 +212,19 @@ export class IssuesService {
     const f = await this.load(id, brandId);
     if (f.waitingOn !== 'COURIER' && f.waitingOn !== 'VENDOR') return;
     const target = this.reminderTarget(f);
-    await this.alerts.send({
+    await this.alerts.notify({
       brandId,
-      channel: 'WHATSAPP',
-      to: target.phone ? `+91 ${target.phone}` : target.name,
+      phone: target.phone,
+      name: target.name,
       kind: 'ISSUE_OPENED',
       title: f.title,
-      body: `${f.title}\n${f.message}\nPlease reply with a name and a time, or the result.\n${this.replyHint(f.waitingOn)}`,
-      link: `/issues/${f.id}`,
+      body: `${f.message}\nAnswer with a name and a time, or the result.`,
+      link: this.partnerLink(f.waitingOn),
       dedupeKey: `opened:${f.id}:${f.waitingSince?.getTime() ?? 0}`,
       now,
     });
     await this.prisma.redFlag.update({ where: { id }, data: { lastReminderAt: now } });
-    await this.event(id, { kind: 'ASK', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Sent to ${target.name} on WhatsApp.`, via: 'WHATSAPP', at: now });
+    await this.event(id, { kind: 'ASK', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Sent to ${target.name} in ${this.where(f.waitingOn)}.`, via: 'APP', at: now });
   }
 
   /** A promised time passed with the issue still open: counted, and the reminders start again. */
@@ -257,19 +263,19 @@ export class IssuesService {
       const target = this.reminderTarget(f);
       const link = `/issues/${f.id}`;
       const waitedH = Math.max(1, Math.round((now.getTime() - f.waitingSince!.getTime()) / HOUR));
-      await this.alerts.send({
+      await this.alerts.notify({
         brandId,
-        channel: 'WHATSAPP',
-        to: target.phone ? `+91 ${target.phone}` : target.name,
+        phone: target.phone,
+        name: target.name,
         kind: 'ISSUE_REMINDER',
         title: `Reminder ${count}: ${f.title}`,
-        body: `${f.title} — waiting on you for ${waitedH} h.\nPlease reply with a name and a time, or the result.\n${this.replyHint(f.waitingOn)}`,
-        link,
+        body: `Waiting on you for ${waitedH} h. Answer with a name and a time, or the result.`,
+        link: this.partnerLink(f.waitingOn),
         dedupeKey: `remind:${f.id}:${since}`,
         now,
       });
       await this.prisma.redFlag.update({ where: { id: f.id }, data: { reminderCount: count, lastReminderAt: now } });
-      await this.event(f.id, { kind: 'REMINDER', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Reminder ${count} sent to ${target.name} on WhatsApp. No reply for ${waitedH} h.`, via: 'WHATSAPP', at: now });
+      await this.event(f.id, { kind: 'REMINDER', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Reminder ${count} sent to ${target.name} in ${this.where(f.waitingOn)}. No reply for ${waitedH} h.`, via: 'APP', at: now });
       if (count === IGNORED_BEFORE_MANAGER) await this.toManager(f, brandId, count, now);
       if (count >= IGNORED_BEFORE_AUTO_SWITCH && f.waitingOn === 'COURIER') await this.stopWaiting(f, count, now);
       n++;
@@ -278,13 +284,15 @@ export class IssuesService {
   }
 
   /**
-   * Where the other side answers. Vendors have their own login; couriers reply
-   * on the WhatsApp itself until their Partner app login, and the reply is
-   * logged on the issue. Never a link to a page they cannot open.
+   * Where the other side answers: couriers in the partner app (/p), vendors in
+   * the vendor app (/v). An SMS only carries the link; WhatsApp is not used.
    */
-  private replyHint(party: string | null): string {
-    if (party === 'VENDOR') return `Answer here: ${fullLink('/v')}`;
-    return 'Reply to this message; your reply is recorded on the issue with the time.';
+  private partnerLink(party: string | null): string | undefined {
+    return party === 'VENDOR' ? '/v' : party === 'COURIER' ? '/p' : undefined;
+  }
+
+  private where(party: string | null): string {
+    return party === 'VENDOR' ? 'the vendor app' : party === 'COURIER' ? 'the partner app' : 'an SMS';
   }
 
   private reminderTarget(f: Flag): { name: string; phone: string | null } {
@@ -299,7 +307,7 @@ export class IssuesService {
   }
 
   /**
-   * Nudging alone can be ignored, as on WhatsApp. So when a courier stays silent
+   * Nudging alone can be ignored. So when a courier stays silent
    * after its manager was told, the platform stops waiting: pickup parcels move
    * to the most reliable other courier, and the silence goes on the scorecard.
    */
@@ -329,14 +337,14 @@ export class IssuesService {
         where: { brandId, courierCode: f.courierContact.courierCode, active: true, role: f.courierContact.role === 'REGIONAL_MANAGER' ? 'ACCOUNT_MANAGER' : 'REGIONAL_MANAGER', id: { not: f.courierContact.id } },
       });
       if (boss) {
-        await this.alerts.send({
+        await this.alerts.notify({
           brandId,
-          channel: 'WHATSAPP',
-          to: `+91 ${boss.phone}`,
+          phone: boss.phone,
+          name: boss.name,
           kind: 'ISSUE_ESCALATED',
           title: `${f.courierContact.name} has not answered: ${f.title}`,
-          body: `${f.courierContact.name} ignored ${ignored} reminders on "${f.title}". Please take it over.\n${this.replyHint('COURIER')}`,
-          link,
+          body: `${f.courierContact.name} ignored ${ignored} reminders on "${f.title}". Please take it over.`,
+          link: '/p',
           dedupeKey: `ignored:${f.id}:${f.waitingSince!.getTime()}`,
           now,
         });
@@ -562,7 +570,7 @@ export class IssuesService {
             slotInHours: slotFits(f.pickup.slotStart, f.pickup.warehouse),
           }
         : null,
-      events: events.map((e) => ({ id: e.id, kind: e.kind, by: e.actorName, party: e.actorParty, body: e.body, via: e.via, promiseAt: e.promiseAt, at: e.createdAt })),
+      events: events.map((e) => ({ id: e.id, kind: e.kind, by: e.actorName, party: e.actorParty, body: e.body, via: e.via, promiseAt: e.promiseAt, photoId: e.photoId, at: e.createdAt })),
     };
   }
 
@@ -583,23 +591,23 @@ export class IssuesService {
       case 'ask': {
         await turnTo(a.party, { promiseAt: null, promiseText: null });
         const target = this.reminderTarget({ ...f, waitingOn: a.party });
-        await this.alerts.send({
+        await this.alerts.notify({
           brandId,
-          channel: 'WHATSAPP',
-          to: target.phone ? `+91 ${target.phone}` : target.name,
+          phone: target.phone,
+          name: target.name,
           kind: 'ISSUE_ASK',
           title: f.title,
-          body: `${a.body}\nPlease answer with a name and a time, or the result.\n${this.replyHint(a.party)}`,
-          link: `/issues/${id}`,
+          body: `${a.body}\nAnswer with a name and a time, or the result.`,
+          link: this.partnerLink(a.party),
           dedupeKey: `ask:${id}:${now.getTime()}`,
           now,
         });
-        await this.event(id, { ...me, kind: 'ASK', body: `Asked ${target.name}: ${a.body}`, via: 'WHATSAPP' });
+        await this.event(id, { ...me, kind: 'ASK', body: `Asked ${target.name} in ${this.where(a.party)}: ${a.body}`, via: 'APP' });
         break;
       }
 
       case 'partner_reply': {
-        // Logged from WhatsApp, a call or email, so it counts on the record like a reply on the platform.
+        // Logged from a call, email or a visit, so it counts on the record like a reply on the platform.
         const who = a.party === 'COURIER' ? (f.courierContact?.name ?? this.courierOf(f)?.name ?? 'Courier') : a.party === 'VENDOR' ? (this.vendorOf(f)?.contactName ?? 'Vendor') : (f.shipment?.order.customerName ?? 'Customer');
         await this.event(id, { kind: 'PARTNER_REPLY', actorId: actor.id, actorName: `${who} (logged by ${actor.name})`, actorParty: a.party, body: a.body, via: a.via, promiseAt: a.promiseAt, at: now });
         if (a.promiseAt) {
@@ -748,22 +756,7 @@ export class IssuesService {
     });
     await this.event(f.id, { kind: 'SYSTEM', actorId: actor.id, actorName: actor.name, actorParty: 'OURS', body: `Raised: ${input.body}`, at: now });
     await this.tellFirst(f.id, brandId, now);
-    // "Warehouse was closed": checked against the hours the vendor declared, so it is not one word against another.
-    if (input.type === 'PICKUP_CLAIM' && input.pickupId) {
-      const p = await this.prisma.pickup.findUnique({ where: { id: input.pickupId }, include: { warehouse: true } });
-      if (p) {
-        const inside = slotFits(p.slotStart, p.warehouse);
-        await this.event(f.id, {
-          kind: 'SYSTEM',
-          actorName: 'D2C Logistics',
-          actorParty: 'SYSTEM',
-          body: inside
-            ? `Checked: the ${slotLabel(p.slotStart)} slot is inside ${p.warehouse.name}'s declared hours (${hoursLabel(p.warehouse)}). A "closed" claim needs a photo with time and place from the executive.`
-            : `Checked: the ${slotLabel(p.slotStart)} slot is outside ${p.warehouse.name}'s declared hours (${hoursLabel(p.warehouse)}). The slot was wrong, not the courier.`,
-          at: now,
-        });
-      }
-    }
+    if (input.type === 'PICKUP_CLAIM' && input.pickupId) await this.hoursCheck(f.id, input.pickupId, now);
     return this.detail(f.id, now);
   }
 
@@ -796,14 +789,136 @@ export class IssuesService {
     if (r.promiseAt && r.promiseAt <= now) throw new BadRequestException('Pick a time in the future');
     const body = r.kind === 'READY' ? `Open and parcels are ready.${r.body ? ` ${r.body}` : ''}` : r.kind === 'NOT_READY' ? `Not ready.${r.body ? ` ${r.body}` : ''}` : (r.body ?? '');
     if (!body.trim()) throw new BadRequestException('Write a message');
-    await this.event(id, { kind: 'PARTNER_REPLY', actorId: actor.id, actorName: `${this.vendorOf(f)?.contactName ?? actor.name} (${this.vendorOf(f)?.name ?? 'vendor'})`, actorParty: 'VENDOR', body, via: 'PLATFORM', promiseAt: r.promiseAt, at: now });
+    await this.event(id, { kind: 'PARTNER_REPLY', actorId: actor.id, actorName: `${this.vendorOf(f)?.contactName ?? actor.name} (${this.vendorOf(f)?.name ?? 'vendor'})`, actorParty: 'VENDOR', body, via: 'APP', promiseAt: r.promiseAt, at: now });
     // A vendor's "ready" passes the turn back to the courier; "not ready by 3 pm" is the vendor's promise.
     const next: Party = r.kind === 'READY' && f.waitingOn === 'VENDOR' ? 'COURIER' : r.promiseAt ? 'VENDOR' : 'OURS';
     await this.prisma.redFlag.update({
       where: { id },
       data: { waitingOn: next, waitingSince: now, reminderCount: 0, lastReminderAt: null, promiseAt: r.promiseAt ?? null, promiseText: r.promiseAt ? body.slice(0, 200) : null },
     });
+    // "Ready" hands it to the courier: they hear about it at once in the partner app.
+    if (next === 'COURIER') await this.tellFirst(id, brandId, now);
+    await this.tellOwner(f, `${this.vendorOf(f)?.name ?? 'Vendor'} answered`, body, now);
     return { ok: true };
+  }
+
+  // ---------- Courier side (partner app) ----------
+
+  /** "Warehouse was closed": checked against the hours the vendor declared, so it is not one word against another. */
+  async hoursCheck(flagId: string, pickupId: string, now: Date) {
+    const p = await this.prisma.pickup.findUnique({ where: { id: pickupId }, include: { warehouse: true } });
+    if (!p) return;
+    const inside = slotFits(p.slotStart, p.warehouse);
+    await this.event(flagId, {
+      kind: 'SYSTEM',
+      actorName: 'D2C Logistics',
+      actorParty: 'SYSTEM',
+      body: inside
+        ? `Checked: the ${slotLabel(p.slotStart)} slot is inside the declared hours of ${p.warehouse.name} (${hoursLabel(p.warehouse)}). A "closed" claim needs a photo with time and place from the executive.`
+        : `Checked: the ${slotLabel(p.slotStart)} slot is outside the declared hours of ${p.warehouse.name} (${hoursLabel(p.warehouse)}). The slot was wrong, not the courier.`,
+      at: now,
+    });
+  }
+
+  /** Tells the side whose turn it is, right now (used when a partner opens an issue). */
+  async announce(id: string, now = new Date()) {
+    await this.tellFirst(id, await this.brands.currentBrandId(), now);
+  }
+
+  /** Writes a line in the room on behalf of a partner (used by the partner app). */
+  partnerEvent(flagId: string, e: { kind: string; actorId: string; actorName: string; actorParty: string; body: string; at: Date }) {
+    return this.event(flagId, { ...e, via: 'APP' });
+  }
+
+  /** The courier an issue is about must be the courier of the person answering. */
+  async courierIssue(id: string, courierCode: string) {
+    const brandId = await this.brands.currentBrandId();
+    const f = await this.load(id, brandId);
+    if (this.courierOf(f)?.code !== courierCode) throw new NotFoundException('Issue not found');
+    return f;
+  }
+
+  /**
+   * A courier answers inside the partner app, on the record:
+   *  PROMISE - a name and a time ("Ramesh will reach by 4 pm"); reminders stop until then;
+   *  DONE    - says it is done; our team checks, and scans close it by themselves;
+   *  MESSAGE - anything else; the turn comes back to us.
+   */
+  async courierAnswer(id: string, a: z.infer<typeof CourierAnswerSchema>, actor: { id: string; name: string; courierCode: string }, now = new Date()) {
+    const f = await this.courierIssue(id, actor.courierCode);
+    if (f.resolvedAt) throw new BadRequestException('This issue is already solved');
+    if (a.kind === 'PROMISE' && (!a.promiseAt || a.promiseAt <= now)) throw new BadRequestException('Pick a time in the future');
+    const body = a.kind === 'DONE' ? `Done: ${a.body}` : a.body;
+    await this.event(id, { kind: 'PARTNER_REPLY', actorId: actor.id, actorName: `${actor.name} (${this.courierOf(f)?.name})`, actorParty: 'COURIER', body, via: 'APP', promiseAt: a.kind === 'PROMISE' ? a.promiseAt : null, at: now });
+    await this.prisma.redFlag.update({
+      where: { id },
+      data:
+        a.kind === 'PROMISE'
+          ? { waitingOn: 'COURIER', waitingSince: now, reminderCount: 0, lastReminderAt: null, promiseAt: a.promiseAt, promiseText: a.body.slice(0, 200), dueAt: a.promiseAt, escalationLevel: 0, escalatedAt: null }
+          : { waitingOn: 'OURS', waitingSince: now, reminderCount: 0, lastReminderAt: null, promiseAt: null, promiseText: null },
+    });
+    await this.tellOwner(f, `${this.courierOf(f)?.name} answered`, body, now);
+    return this.partnerView(id, now);
+  }
+
+  /** A proof photo (warehouse shutter, parcel, delivery) with when and, if the phone shares it, where. */
+  async addPhoto(id: string, dataUrl: string, place: { lat?: number; lng?: number }, actor: { id: string; name: string; party: 'COURIER' | 'VENDOR' | 'OURS'; company: string }, now = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+    const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl ?? '');
+    if (!m) throw new BadRequestException('Send a JPEG, PNG or WebP photo');
+    const data = Buffer.from(m[2], 'base64');
+    if (data.length > 3 * 1024 * 1024) throw new BadRequestException('Photo is larger than 3 MB');
+    const photo = await this.prisma.issuePhoto.create({ data: { brandId, flagId: id, mime: m[1], data, sizeBytes: data.length, uploadedById: actor.id, lat: place.lat ?? null, lng: place.lng ?? null, createdAt: now } });
+    const where = place.lat !== undefined && place.lng !== undefined ? ` at ${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}` : '';
+    await this.event(id, { kind: 'PHOTO', actorId: actor.id, actorName: `${actor.name} (${actor.company})`, actorParty: actor.party, body: `Photo taken ${fmt(now)}${where}`, via: 'APP', at: now, photoId: photo.id });
+    return { id: photo.id };
+  }
+
+  async photo(id: string, scope: { courierCode?: string; warehouseId?: string } = {}) {
+    const brandId = await this.brands.currentBrandId();
+    const p = await this.prisma.issuePhoto.findFirst({ where: { id, brandId } });
+    if (!p) throw new NotFoundException('Photo not found');
+    if (scope.courierCode) await this.courierIssue(p.flagId, scope.courierCode);
+    return p;
+  }
+
+  /** What a courier sees of one issue: the story so far and whose turn it is. */
+  async partnerView(id: string, now = new Date()) {
+    const d = await this.detail(id, now);
+    return {
+      id: d.id,
+      title: d.title,
+      message: d.message,
+      about: d.about,
+      open: d.open,
+      yourTurn: d.waitingOn === 'COURIER',
+      waitingOnLabel: d.waitingOnLabel,
+      waitedMinutes: d.waitedMinutes,
+      reminders: d.reminders,
+      promiseAt: d.promiseAt,
+      promisesBroken: d.promisesBroken,
+      outcome: d.outcome,
+      pickup: d.pickup ? { warehouse: d.pickup.warehouse, slotStart: d.pickup.slotStart, hours: d.pickup.hours } : null,
+      shipment: d.shipment ? { orderNumber: d.shipment.orderNumber, awb: d.shipment.awb, city: d.shipment.city, status: d.shipment.status } : null,
+      events: d.events.filter((e) => e.kind !== 'ESCALATED'),
+    };
+  }
+
+  /** Our owner hears about every partner answer in the app. */
+  private async tellOwner(f: Flag, title: string, body: string, now: Date) {
+    if (!f.owner) return;
+    await this.alerts.send({
+      brandId: f.brandId,
+      userId: f.owner.id,
+      channel: 'APP',
+      to: f.owner.name,
+      kind: 'ISSUE_ANSWERED',
+      title: `${title}: ${f.title}`,
+      body: body.slice(0, 300),
+      link: `/issues/${f.id}`,
+      dedupeKey: `answered:${f.id}:${now.getTime()}`,
+      now,
+    });
   }
 
   // ---------- Courier contacts ----------

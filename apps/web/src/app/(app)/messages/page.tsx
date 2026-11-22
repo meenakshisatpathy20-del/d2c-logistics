@@ -9,7 +9,7 @@ export default function MessagesPage() {
     <>
       <PageHeader
         title="Messages"
-        subtitle="Every WhatsApp, SMS and email the platform sends: alerts to owners, escalations, the 9 pm summary and vendor pickup lists."
+        subtitle="Every SMS link and email the platform sends. No WhatsApp: partners answer in their own app; SMS only carries the link."
       />
       <MessagesView />
     </>
