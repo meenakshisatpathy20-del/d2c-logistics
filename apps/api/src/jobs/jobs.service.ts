@@ -1,5 +1,6 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
+import { AgentService } from '../agent/agent.service.js';
 import { AlertsService } from '../alerts/alerts.service.js';
 import { IssuesService } from '../issues/issues.service.js';
 import { PickupsService } from '../pickups/pickups.service.js';
@@ -35,6 +36,7 @@ export class JobsService implements OnApplicationBootstrap {
     private readonly issues: IssuesService,
     private readonly watchdog: WatchdogService,
     private readonly scorecards: ScorecardsService,
+    private readonly agent: AgentService,
   ) {}
 
   private scoredAt = 0;
@@ -79,7 +81,9 @@ export class JobsService implements OnApplicationBootstrap {
       this.scoredAt = now.getTime();
     }
     const issues = await this.issues.run(now);
+    // The agent's 9 am and 6 pm pending lists to every courier.
+    const agent = await this.agent.routines(now);
     const alerts = await this.alerts.run(now);
-    return { pickups, tracking, watchdog, issues, alerts };
+    return { pickups, tracking, watchdog, issues, agent, alerts };
   }
 }

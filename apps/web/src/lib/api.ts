@@ -688,3 +688,20 @@ export type ReviewPack = {
   claims: { id: string; title: string; about: string; withPhoto: boolean; hoursCheck: string | null; outcome: string | null }[];
 };
 export const getReviewPack = (code: string, days: 7 | 30 = 7) => request<ReviewPack>(`/api/scorecards/${code}/review?days=${days}`);
+
+// ---------- Ops agent ----------
+
+export type AgentItem = { label: string; sub?: string; tone?: "red" | "amber" | "green" | "blue" | "grey"; href?: string; days?: number };
+export type AgentMsg = {
+  id: string;
+  role: "USER" | "AGENT";
+  by: string;
+  body: string;
+  at: string;
+  data?: { items?: AgentItem[]; groups?: { title: string; items: AgentItem[] }[]; tips?: string[]; approvalId?: string; actions?: number; routine?: string; inbound?: boolean } | null;
+};
+export type AgentApproval = { id: string; kind: string; summary: string; status: string; result: string | null; at: string };
+export type AgentStats = { actions: number; minutesSaved: number; promisesWatched: number; approvalsWaiting: number };
+export const getAgentFeed = () => request<{ messages: AgentMsg[]; approvals: AgentApproval[]; stats: AgentStats }>("/api/agent/feed");
+export const askAgent = (text: string) => request<AgentMsg>("/api/agent/ask", { method: "POST", body: JSON.stringify({ text }) });
+export const decideAgent = (id: string, ok: boolean) => request<AgentMsg>(`/api/agent/approvals/${id}/${ok ? "confirm" : "cancel"}`, { method: "POST" });

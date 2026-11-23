@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import {
   Bell,
+  Bot,
   Calculator,
   ChartNoAxesColumn,
   House,
@@ -32,6 +33,7 @@ const NAV = [
   { href: "/", label: "Home", icon: House },
   { href: "/orders", label: "Orders", icon: Package, count: (c: Counts) => c.NEW, tone: "orange" },
   { href: "/pickups", label: "Pickups", icon: Truck },
+  { href: "/agent", label: "Ops agent", icon: Bot },
   { href: "/issues", label: "Issues", icon: Siren, count: (c: Counts) => c.ISSUES_OURS, tone: "red" },
   { href: "/payments", label: "Payments & COD", icon: IndianRupee },
   { href: "/rates", label: "Rate calculator", icon: Calculator },

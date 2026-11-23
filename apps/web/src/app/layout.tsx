@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "D2C Logistics", template: "%s · D2C Logistics" },
+  title: { default: "EcomNext", template: "%s · EcomNext" },
   description: "Book, ship, track and manage every order from one place.",
 };
 

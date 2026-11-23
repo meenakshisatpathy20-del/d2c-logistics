@@ -8,7 +8,7 @@ export function Logo({ onDark = false, compact = false }: { onDark?: boolean; co
         <Image src="/brand/d2c-ecommerce.webp" alt="D2C Ecommerce" width={900} height={284} priority className="h-7 w-auto" />
         <span className="hidden h-6 w-px bg-line sm:block" aria-hidden />
         <span className="hidden text-[11px] font-semibold uppercase tracking-[0.24em] text-brand-blue-deep sm:block">
-          Logistics
+          EcomNext
         </span>
       </span>
     );
@@ -28,7 +28,7 @@ export function Logo({ onDark = false, compact = false }: { onDark?: boolean; co
       <span
         className={`text-[10.5px] font-semibold uppercase tracking-[0.28em] ${onDark ? "text-white/70" : "text-brand-blue-deep"}`}
       >
-        Logistics
+        EcomNext
       </span>
     </div>
   );

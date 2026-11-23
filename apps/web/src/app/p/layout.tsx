@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-export const metadata: Metadata = { title: { default: "Partner app", template: "%s · D2C Logistics" } };
+export const metadata: Metadata = { title: { default: "Partner app", template: "%s · EcomNext" } };
 
 /** Courier staff use a phone or a laptop: one column, big buttons, no menu. */
 export default function PartnerLayout({ children }: { children: ReactNode }) {

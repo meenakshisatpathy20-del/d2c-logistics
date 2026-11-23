@@ -530,3 +530,33 @@ model CourierContact {
 
   @@index([brandId, courierCode])
 }
+
+/** The ops agent's conversation with our team: what was asked, what it did. */
+model AgentMessage {
+  id        String   @id @default(cuid())
+  brandId   String
+  userId    String? // the team member who wrote it; null for the agent
+  role      String // USER, AGENT
+  body      String
+  data      Json? // structured result: counts, links, pending approval id
+  createdAt DateTime @default(now())
+
+  @@index([brandId, createdAt])
+}
+
+/** Work the agent will do only after a person says yes (switching a courier, money). */
+model AgentApproval {
+  id          String    @id @default(cuid())
+  brandId     String
+  kind        String // SWITCH_COURIER, CLOSE_CREDIT
+  params      Json
+  summary     String
+  status      String    @default("PENDING") // PENDING, DONE, CANCELLED, FAILED
+  result      String?
+  requestedBy String?
+  decidedBy   String?
+  createdAt   DateTime  @default(now())
+  decidedAt   DateTime?
+
+  @@index([brandId, status])
+}
