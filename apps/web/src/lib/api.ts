@@ -228,15 +228,15 @@ export const getMe = () => request<Me>("/api/auth/me");
 // ---------- Orders ----------
 
 export const ORDER_TABS = [
+  { key: "ALL", label: "All" },
+  { key: "ATTENTION", label: "Needs attention" },
   { key: "NEW", label: "New" },
   { key: "READY", label: "Ready to ship" },
   { key: "IN_TRANSIT", label: "In transit" },
   { key: "OUT_FOR_DELIVERY", label: "Out for delivery" },
   { key: "DELIVERED", label: "Delivered" },
   { key: "RTO", label: "RTO" },
-  { key: "ATTENTION", label: "Needs attention" },
   { key: "CANCELLED", label: "Cancelled" },
-  { key: "ALL", label: "All" },
 ] as const;
 export type OrderTab = (typeof ORDER_TABS)[number]["key"];
 

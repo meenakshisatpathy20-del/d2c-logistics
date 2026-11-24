@@ -606,7 +606,7 @@ function CourierContactsCard({ couriers, canManage }: { couriers: CourierInfo[];
     <Card>
       <CardTop
         title="Courier contacts"
-        sub="Each issue goes to a named person: the pickup lead for pickups, the account manager for everything else. Each signs in to the partner app (/p) with the mobile saved here and answers there; no WhatsApp. Two ignored reminders and it goes to their regional manager."
+        sub="Each issue goes to a named person: the pickup lead for pickups, the account manager for everything else. Each signs in to the partner app (/p) with the mobile saved here and answers there (WhatsApp replies once the business number is live). Two ignored reminders and it goes to their regional manager."
         action={
           canManage ? (
             <span className="flex gap-2">

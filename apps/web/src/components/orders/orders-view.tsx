@@ -159,7 +159,7 @@ export function OrdersView({
                     setParams({ tab: key, view: null });
                   }}
                   className={clsx(
-                    "relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-3.5 text-[13.5px] font-medium transition-colors",
+                    "relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-3.5 text-[13.5px] font-medium transition-colors",
                     active ? (red ? "text-flag-red" : "text-brand-orange-dark") : "text-muted hover:text-ink",
                   )}
                 >
@@ -469,8 +469,9 @@ function OrdersTable({
                 </td>
                 <td className="py-3 pr-3">
                   <div className="text-ink">{r.customer}</div>
-                  <div className="mt-0.5 text-xs text-muted">
-                    {r.phone} · {r.city || r.pincode} {r.pincode}
+                  <div className="mt-0.5 whitespace-nowrap text-xs text-muted">{r.phone}</div>
+                  <div className="whitespace-nowrap text-xs text-muted">
+                    {r.city || "—"} {r.pincode}
                   </div>
                 </td>
                 <td className="py-3 pr-3">
@@ -485,7 +486,7 @@ function OrdersTable({
                   {r.courier ? (
                     <>
                       <div className="flex items-center gap-1.5 text-ink">
-                        {r.courier} {r.isDemo ? <DemoBadge /> : null}
+                        {r.courier}
                       </div>
                       <div className="mt-0.5 font-mono text-xs text-muted">{r.awb}</div>
                     </>
@@ -496,8 +497,8 @@ function OrdersTable({
                 <td className="py-3 pr-3">
                   <div className="flex flex-wrap items-center gap-1.5">
                     {problem ? (
-                      <Badge tone="red">
-                        <Flag size={11} /> {r.flag?.title ?? st.label}
+                      <Badge tone="red" className="max-w-[240px]">
+                        <Flag size={11} className="shrink-0" /> <span className="truncate" title={r.flag?.title ?? st.label}>{r.flag?.title ?? st.label}</span>
                       </Badge>
                     ) : (
                       <Badge tone={st.tone} dot>
@@ -542,8 +543,8 @@ function RowAction({ row, onOpen }: { row: OrderRow; onOpen: () => void }) {
     );
   if (row.flag || row.status === "NDR")
     return (
-      <button className={primary} onClick={onOpen}>
-        {row.flag?.action ?? "Fix"}
+      <button className={primary} onClick={onOpen} title={row.flag?.action ?? undefined}>
+        Fix it
       </button>
     );
   if (row.labelUrl && ["BOOKED", "PICKUP_SCHEDULED"].includes(row.status))

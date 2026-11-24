@@ -182,9 +182,12 @@ export class PickupsService {
     const pickups = await this.prisma.pickup.findMany({
       where: {
         brandId,
-        slotStart: { gte: start, lt: istAt(now, 24, 7) },
         parcelCount: { gt: 0 },
-        status: { not: 'CANCELLED' },
+        // Upcoming, plus past slots whose parcels are still waiting: the ageing ones must stay in sight.
+        OR: [
+          { slotStart: { gte: start, lt: istAt(now, 24, 7) }, status: { not: 'CANCELLED' } },
+          { slotStart: { lt: start }, status: { in: ['SCHEDULED', 'CONFIRMED', 'MISSED'] }, shipments: { some: { status: { in: ['BOOKED', 'PICKUP_SCHEDULED'] } } } },
+        ],
         ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
       },
       include: {
@@ -204,9 +207,11 @@ export class PickupsService {
     for (const p of pickups) {
       // A pickup whose parcels all moved elsewhere has nothing left to collect.
       if (p.shipments.length === 0 && ['REASSIGNED', 'MISSED', 'POSTPONED'].includes(p.status)) continue;
-      const key = istDateKey(p.slotStart);
-      const label =
-        key === todayKey ? 'Today' : key === tomorrowKey ? 'Tomorrow' : p.slotStart.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
+      const overdue = p.slotStart < start;
+      const key = overdue ? 'overdue' : istDateKey(p.slotStart);
+      const label = overdue
+        ? 'Overdue: not picked up'
+        : key === todayKey ? 'Today' : key === tomorrowKey ? 'Tomorrow' : p.slotStart.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
       const group = days.get(key) ?? { day: label, pickups: [] };
       group.pickups.push({
         id: p.id,

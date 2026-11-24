@@ -127,7 +127,7 @@ describe('Day 7-8: roles, alerts, escalation, summary, vendor view (e2e)', () =>
     expect(await prisma.notification.count({ where: { channel: 'SMS', dedupeKey: { startsWith: `esc:${flag.id}:2:` } } })).toBe(1); // courier: SMS link (plus their partner app, when they have a login)
     expect(await prisma.notification.count({ where: { dedupeKey: { startsWith: `esc:${flag.id}:3:` }, channel: 'APP' } })).toBe(1);
     await alerts.run(new Date(due.getTime() + 9 * HOUR));
-    expect(await prisma.notification.count({ where: { channel: 'SMS', dedupeKey: { startsWith: `esc:${flag.id}:` } } })).toBe(3);
+    expect(await prisma.notification.count({ where: { channel: 'SMS', dedupeKey: { startsWith: `esc:${flag.id}:` } } })).toBe(2); // manager + courier; the founder gets the app and the 7 pm summary, not an SMS per issue
 
     // Acting on a problem stops the ladder.
     const flag2 = await prisma.redFlag.create({

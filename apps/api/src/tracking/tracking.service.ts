@@ -150,7 +150,10 @@ export class TrackingService {
     role: 'OPS' | 'SUPPORT',
     f: { title: string; message: string; action: string; dueAt: Date; now: Date },
   ) {
-    const open = await this.prisma.redFlag.findFirst({ where: { type, shipmentId, resolvedAt: null } });
+    // "Not at hub" and "no scan" are one problem (the parcel went quiet): one issue per parcel, not two.
+    const silentTypes = ['NO_SCAN_48H', 'NOT_AT_HUB'];
+    const open = await this.prisma.redFlag.findFirst({ where: { type: silentTypes.includes(type) ? { in: silentTypes } : type, shipmentId, resolvedAt: null } });
+    if (open && open.type !== type) await this.prisma.redFlag.update({ where: { id: open.id }, data: { type } });
     if (open) {
       // Keep the hours count current on an open "no scan" flag.
       if (open.title !== f.title) {

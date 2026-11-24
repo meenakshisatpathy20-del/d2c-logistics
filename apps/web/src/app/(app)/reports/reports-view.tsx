@@ -216,7 +216,7 @@ function DailySummaryCard() {
     <Card className="p-5 lg:col-span-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-[15px] font-semibold text-ink">Daily summary {data ? <span className="font-normal text-muted">· {data.day}</span> : null}</h2>
+          <h2 className="text-[15px] font-semibold text-ink">Daily summary {data ? <span className="font-normal text-muted">· {new Date(`${data.day}T12:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span> : null}</h2>
           <p className="mt-0.5 text-[13px] text-muted">Sent to management every day at 9 pm in the app and by email.</p>
         </div>
         <span className="flex items-center gap-2">

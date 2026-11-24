@@ -222,7 +222,8 @@ export class AlertsService {
           } else to = 'no courier involved, skipped';
         } else if (founder) {
           to = founder.name;
-          await this.toPerson(brandId, founder, { kind: 'ESCALATION', title: `⬆⬆ Founder escalation: ${what}`, body: `${f.message} · ${lateText}`, link, key: `esc:${f.id}:3:${round}`, now });
+          // App only: one SMS per issue would flood the founder. The 7 pm agent summary lists who is ignoring us.
+          await this.send({ brandId, userId: founder.id, channel: 'APP', to: founder.name, kind: 'ESCALATION', title: `⬆⬆ Founder escalation: ${what}`, body: `${f.message} · ${lateText}`, link, dedupeKey: `esc:${f.id}:3:${round}:app`, now });
         }
         await this.prisma.redFlag.update({ where: { id: f.id }, data: { escalationLevel: level, escalatedAt: now } });
         await this.prisma.auditLog.create({
