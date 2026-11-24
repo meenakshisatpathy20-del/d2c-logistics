@@ -121,9 +121,9 @@ export class TrackingService {
       // Picked up but never reached the hub: a day is enough to ask. In transit: two days.
       const silent =
         status === 'PICKED_UP' && silentHours >= NOT_AT_HUB_HOURS
-          ? { type: 'NOT_AT_HUB', what: (h: number) => `Not at the hub ${h} hours after pickup` }
+          ? { type: 'NOT_AT_HUB', what: (h: number) => `Not at the hub ${h >= 48 ? `${Math.floor(h / 24)} days` : `${h} hours`} after pickup` }
           : status === 'IN_TRANSIT' && silentHours >= NO_SCAN_HOURS
-            ? { type: 'NO_SCAN_48H', what: (h: number) => `No scan for ${h} hours` }
+            ? { type: 'NO_SCAN_48H', what: (h: number) => `No scan for ${h >= 48 ? `${Math.floor(h / 24)} days` : `${h} hours`}` }
             : null;
       if (silent) {
         const lastPlace = place(fresh.at(-1)?.location ?? last.location ?? '');

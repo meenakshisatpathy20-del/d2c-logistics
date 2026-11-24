@@ -324,6 +324,16 @@ export class IssuesService {
         body: `${ignored} reminders ignored, so we stopped waiting: parcels moved from ${r.from} to ${r.to}, pickup ${r.slot}. The old booking was cancelled. Close this with who was at fault.`,
         at: now,
       });
+      // The team sees it in the agent chat too, not only inside the issue.
+      await this.prisma.agentMessage.create({
+        data: {
+          brandId: f.brandId,
+          role: 'AGENT',
+          body: `${r.from} ignored ${ignored} reminders on the ${f.pickup?.warehouse.name ?? ''} pickup, so I moved the waiting parcels to ${r.to}, pickup ${r.slot}. It counts against ${r.from} on the scorecard.`,
+          data: { actions: 1, items: [{ label: f.title, sub: `${r.from} → ${r.to}`, tone: 'amber', href: `/issues/${f.id}` }] },
+          createdAt: now,
+        },
+      });
     } catch (e) {
       await this.event(f.id, { kind: 'SYSTEM', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `Could not move the parcels by itself: ${(e as Error).message}. Switch the courier from here.`, at: now });
     }
@@ -926,6 +936,45 @@ export class IssuesService {
   async contacts() {
     const brandId = await this.brands.currentBrandId();
     return this.prisma.courierContact.findMany({ where: { brandId }, orderBy: [{ courierCode: 'asc' }, { role: 'asc' }] });
+  }
+
+  /**
+   * The courier contact sheet in one paste: courier, name, role, mobile, email, region.
+   * A mobile already on that courier updates the person; a bad line is reported, not saved.
+   */
+  async importContacts(csv: string) {
+    const brandId = await this.brands.currentBrandId();
+    const couriers = await this.prisma.courier.findMany();
+    const roleOf = (r: string) => {
+      const t = r.toLowerCase();
+      return t.includes('pickup') ? 'PICKUP_LEAD' : t.includes('region') ? 'REGIONAL_MANAGER' : t.includes('hub') ? 'HUB' : t.includes('account') || t.includes('kam') || t.includes('manager') ? 'ACCOUNT_MANAGER' : null;
+    };
+    const out = { added: 0, updated: 0, errors: [] as Array<{ line: number; error: string }> };
+    const lines = csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (const [i, line] of lines.entries()) {
+      const cells = line.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+      if (i === 0 && /courier/i.test(cells[0]) && /name/i.test(cells[1] ?? '')) continue; // header row
+      const w = (cells[0] ?? '').toLowerCase().replace(/\s/g, '');
+      const courier = couriers.find((c) => c.code.toLowerCase() === w || c.name.toLowerCase().replace(/\s/g, '') === w);
+      const role = roleOf(cells[2] ?? '');
+      const phone = (cells[3] ?? '').replace(/\D/g, '').slice(-10);
+      const r = ContactSchema.safeParse({ courierCode: courier?.code ?? '', name: cells[1] ?? '', role: role ?? '', phone, email: cells[4] ?? '', region: cells[5] || undefined });
+      if (!courier) out.errors.push({ line: i + 1, error: `Unknown courier "${cells[0]}"` });
+      else if (!role) out.errors.push({ line: i + 1, error: `Role must be pickup lead, account manager, hub or regional manager` });
+      else if (!r.success) out.errors.push({ line: i + 1, error: r.error.issues[0].message });
+      else {
+        const same = await this.prisma.courierContact.findFirst({ where: { brandId, courierCode: courier.code, phone } });
+        const data = { ...r.data, email: r.data.email || null, active: true };
+        if (same) {
+          await this.prisma.courierContact.update({ where: { id: same.id }, data });
+          out.updated++;
+        } else {
+          await this.prisma.courierContact.create({ data: { ...data, brandId } });
+          out.added++;
+        }
+      }
+    }
+    return out;
   }
 
   async saveContact(input: z.infer<typeof ContactSchema>, id?: string) {

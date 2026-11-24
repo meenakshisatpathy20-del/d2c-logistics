@@ -90,6 +90,14 @@ export class IssuesController {
   }
 
   @Roles('ADMIN', 'OPS')
+  @Post('settings/courier-contacts/import')
+  @HttpCode(200)
+  importContacts(@Body() body: { csv?: unknown }) {
+    if (typeof body?.csv !== 'string' || body.csv.length > 200_000) throw new BadRequestException('Paste the contact sheet as CSV');
+    return this.issues.importContacts(body.csv);
+  }
+
+  @Roles('ADMIN', 'OPS')
   @Patch('settings/courier-contacts/:id')
   updateContact(@Param('id') id: string, @Body() body: unknown) {
     return this.issues.saveContact(parse(ContactSchema, body), id);

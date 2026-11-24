@@ -115,4 +115,22 @@ describe('Day 13: the ops agent does the chasing (e2e)', () => {
     const f = await prisma.redFlag.findFirst({ where: { type: 'CREDIT_NOTE_PENDING', courierCode: 'DELHIVERY', resolvedAt: null } });
     expect(f).not.toBeNull();
   });
+
+  it('imports the courier contact sheet and reports bad lines', async () => {
+    const r = await founder
+      .post('/api/settings/courier-contacts/import')
+      .send({ csv: 'courier,name,role,mobile\nDelhivery, Import Tester, pickup lead, 9800011122\nNobody Express, X Y, hub, 9800011123\nEkart, Bad Phone, hub, 12345' })
+      .expect(200);
+    expect(r.body.added + r.body.updated).toBe(1);
+    expect(r.body.errors.map((e: { line: number }) => e.line)).toEqual([3, 4]);
+    await prisma.courierContact.deleteMany({ where: { phone: '9800011122', name: 'Import Tester' } });
+  });
+
+  it('Chase now on an issue messages the partner, and the summary covers the day', async () => {
+    const f = await prisma.redFlag.findFirstOrThrow({ where: { resolvedAt: null, waitingOn: { in: ['COURIER', 'VENDOR'] } } });
+    const r = await founder.post(`/api/agent/issues/${f.id}/chase`).expect(200);
+    expect(r.body.body).toContain('chase');
+    const s = await ask("Today's summary");
+    expect(s.body.body).toMatch(/^Today: /);
+  });
 });

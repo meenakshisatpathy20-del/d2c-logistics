@@ -705,3 +705,6 @@ export type AgentStats = { actions: number; minutesSaved: number; promisesWatche
 export const getAgentFeed = () => request<{ messages: AgentMsg[]; approvals: AgentApproval[]; stats: AgentStats }>("/api/agent/feed");
 export const askAgent = (text: string) => request<AgentMsg>("/api/agent/ask", { method: "POST", body: JSON.stringify({ text }) });
 export const decideAgent = (id: string, ok: boolean) => request<AgentMsg>(`/api/agent/approvals/${id}/${ok ? "confirm" : "cancel"}`, { method: "POST" });
+export const chaseIssue = (id: string) => request<AgentMsg>(`/api/agent/issues/${id}/chase`, { method: "POST" });
+export const importCourierContacts = (csv: string) =>
+  request<{ added: number; updated: number; errors: { line: number; error: string }[] }>("/api/settings/courier-contacts/import", { method: "POST", body: JSON.stringify({ csv }) });

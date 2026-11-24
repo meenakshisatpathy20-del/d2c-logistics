@@ -38,6 +38,13 @@ export class AgentController {
     return this.agent.ask(parse(AskSchema, body).text, actor(req));
   }
 
+  @Roles('ADMIN', 'OPS', 'WAREHOUSE', 'SUPPORT', 'FINANCE')
+  @Post('issues/:id/chase')
+  @HttpCode(200)
+  chaseIssue(@Param('id') id: string, @Req() req: Req) {
+    return this.agent.chaseIssue(id, actor(req));
+  }
+
   @Roles('ADMIN', 'OPS')
   @Post('approvals/:id/confirm')
   @HttpCode(200)

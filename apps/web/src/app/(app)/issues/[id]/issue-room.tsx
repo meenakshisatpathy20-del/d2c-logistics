@@ -20,7 +20,7 @@ import Link from "next/link";
 import { type ReactNode, useCallback, useState } from "react";
 import { costText, IssueChips, PARTY_NAME, PARTY_TONE, WaitingOn } from "@/components/issues/issue-bits";
 import { Badge, Button, Card, Field, inputClass } from "@/components/ui/primitives";
-import { issuePhotoUrl, actOnIssue, getIssue, type IssueAction, type IssueDetail, type Party } from "@/lib/api";
+import { issuePhotoUrl, actOnIssue, chaseIssue, getIssue, type IssueAction, type IssueDetail, type Party } from "@/lib/api";
 import { useLive } from "@/lib/use-live";
 
 const when = (iso: string) =>
@@ -112,6 +112,27 @@ export function IssueRoom({ id }: { id: string }) {
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <WaitingOn party={issue.waitingOn} person={issue.waitingPerson} minutes={issue.waitedMinutes} />
             {costText(issue.cost) ? <span className="text-[13px] font-medium text-ink-2">Costing us: {costText(issue.cost)}</span> : null}
+            {issue.waitingOn === "COURIER" || issue.waitingOn === "VENDOR" ? (
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setMsg(null);
+                  try {
+                    await chaseIssue(id);
+                    await refresh();
+                    setMsg({ ok: true, text: "The agent messaged them and will check back on the clock." });
+                  } catch (e) {
+                    setMsg({ ok: false, text: (e as Error).message });
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-navy px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-navy-2 disabled:opacity-50"
+              >
+                Chase now
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

@@ -8,6 +8,7 @@ import { Badge, Button, Card, DemoBadge, Field, inputClass } from "@/components/
 import {
   type CourierContactRow,
   getCourierContacts,
+  importCourierContacts,
   saveCourierContact,
   addTeamMember,
   addWarehouse,
@@ -589,6 +590,9 @@ const CONTACT_ROLE: Record<string, string> = { ACCOUNT_MANAGER: "Account manager
 function CourierContactsCard({ couriers, canManage }: { couriers: CourierInfo[]; canManage: boolean }) {
   const [rows, setRows] = useState<CourierContactRow[] | null>(null);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [csv, setCsv] = useState("");
+  const [imported, setImported] = useState<string | null>(null);
   const [f, setF] = useState({ courierCode: "", name: "", role: "ACCOUNT_MANAGER", phone: "" });
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => getCourierContacts().then(setRows, () => {}), []);
@@ -603,8 +607,40 @@ function CourierContactsCard({ couriers, canManage }: { couriers: CourierInfo[];
       <CardTop
         title="Courier contacts"
         sub="Each issue goes to a named person: the pickup lead for pickups, the account manager for everything else. Each signs in to the partner app (/p) with the mobile saved here and answers there; no WhatsApp. Two ignored reminders and it goes to their regional manager."
-        action={canManage ? <Button size="sm" variant="secondary" onClick={() => setAdding((v) => !v)}><Plus size={14} /> Add contact</Button> : null}
+        action={
+          canManage ? (
+            <span className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setImporting((v) => !v)}>Import sheet</Button>
+              <Button size="sm" variant="secondary" onClick={() => setAdding((v) => !v)}><Plus size={14} /> Add contact</Button>
+            </span>
+          ) : null
+        }
       />
+      {importing ? (
+        <div className="border-b border-line bg-page/50 px-5 py-4">
+          <p className="mb-2 text-[13px] text-ink-2">Paste the contact sheet, one person a line: <b>courier, name, role, mobile, email, region</b>. Role is pickup lead, account manager, hub or regional manager.</p>
+          <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={5} className={clsx(inputClass, "h-auto font-mono text-[12.5px]")} placeholder={"Delhivery, Ravi Kumar, pickup lead, 9876543210, ravi@delhivery.com, Mumbai West\nEkart, Sana Shaikh, account manager, 9123456780"} />
+          <div className="mt-2 flex items-center gap-3">
+            <Button
+              size="sm"
+              disabled={!csv.trim()}
+              onClick={async () => {
+                try {
+                  const r = await importCourierContacts(csv);
+                  setImported(`${r.added} added, ${r.updated} updated${r.errors.length ? `. Not saved: ${r.errors.map((x) => `line ${x.line} (${x.error})`).join("; ")}` : ""}`);
+                  if (!r.errors.length) setCsv("");
+                  load();
+                } catch (e) {
+                  setImported((e as Error).message);
+                }
+              }}
+            >
+              Import
+            </Button>
+            {imported ? <span className="text-[13px] text-ink-2">{imported}</span> : null}
+          </div>
+        </div>
+      ) : null}
       {adding ? (
         <form
           className="grid gap-3 border-b border-line bg-page/50 px-5 py-4 sm:grid-cols-5"

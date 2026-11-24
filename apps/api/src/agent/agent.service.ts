@@ -20,6 +20,8 @@ const AGEING_HOURS = 24;
 const MINUTES_PER_ACTION = 4;
 /** The 9 am and 6 pm lists go out within this hour (IST). */
 export const ROUTINE_HOURS = [9, 18] as const;
+/** The day's summary for the team, in the chat. */
+export const SUMMARY_HOUR = 19;
 const BOOK_CAP = 50;
 const CHASE_CAP = 40;
 
@@ -38,6 +40,7 @@ export type Intent =
   | { kind: 'switch'; courier?: string; vendor?: string }
   | { kind: 'credit'; amount: number; courier?: string; note: string; by: Date | null }
   | { kind: 'lists' }
+  | { kind: 'summary' }
   | { kind: 'unknown' };
 
 /** One line the page draws as a row: a parcel, a pickup, an issue or a courier. */
@@ -75,6 +78,7 @@ export function readIntent(text: string, now: Date): Intent {
   const amount = amountIn(text);
   if (/^(help|\?|hi|hello|what can you do)/.test(t)) return { kind: 'help' };
   if (/\b(morning|evening|9 ?am|6 ?pm)\b.*\blists?\b|\bsend (the )?lists?\b/.test(t)) return { kind: 'lists' };
+  if (/\b(summary|report|how did (we|today) do|day so far)\b/.test(t)) return { kind: 'summary' };
   if (amount !== null && /\b(credit|refund|adjust|owe|due|pending|payment|recover|claim)/.test(t)) {
     const by = /\bby\b/.test(t) ? parseWhen(t.slice(t.indexOf('by')), now) : null;
     return { kind: 'credit', amount, courier: courierWord(t), note: text.trim(), by };
@@ -141,6 +145,7 @@ export class AgentService {
     await this.prisma.agentMessage.create({ data: { brandId, userId: actor.id, role: 'USER', body: text, createdAt: now } });
     let intent = readIntent(text, now);
     if (intent.kind === 'unknown') intent = (await llmIntent(text, now).catch((e) => (this.log.warn(`Claude intent failed: ${(e as Error).message}`), null))) ?? intent;
+    if (intent.kind === 'summary') return (await this.daySummary(now, true))!;
     let reply: Reply;
     try {
       reply = await this.run(intent, actor, brandId, now);
@@ -287,20 +292,22 @@ export class AgentService {
 
   /** Unpicked parcels grouped by courier and vendor, oldest first, with the days they have waited. */
   private byCourierVendor(list: Awaited<ReturnType<AgentService['unpicked']>>, now: Date): Item[] {
-    const g = new Map<string, { courier: string; vendor: string; n: number; oldest: Date; value: number }>();
+    const g = new Map<string, { courier: string; vendor: string; n: number; oldest: Date; value: number; cod: number }>();
     for (const s of list) {
       const k = `${s.courierCode}:${s.order.pickupWarehouseId}`;
-      const e = g.get(k) ?? { courier: s.courier.name, vendor: s.order.pickupWarehouse.name, n: 0, oldest: s.createdAt, value: 0 };
+      const e = g.get(k) ?? { courier: s.courier.name, vendor: s.order.pickupWarehouse.name, n: 0, oldest: s.createdAt, value: 0, cod: 0 };
       e.n++;
       e.value += Number(s.order.orderValue);
+      e.cod += Number(s.order.codAmount);
       if (s.createdAt < e.oldest) e.oldest = s.createdAt;
       g.set(k, e);
     }
     return [...g.values()]
-      .sort((a, b) => a.oldest.getTime() - b.oldest.getTime())
+      // Most money held up first: that is the order to chase in.
+      .sort((a, b) => b.value - a.value || a.oldest.getTime() - b.oldest.getTime())
       .map((e) => {
         const days = Math.floor((now.getTime() - e.oldest.getTime()) / DAY);
-        return { label: `${e.courier} at ${e.vendor}`, sub: `${plural(e.n, 'parcel')} · ${money(e.value)} held up`, days, tone: days >= 3 ? 'red' : 'amber', href: '/pickups' };
+        return { label: `${e.courier} at ${e.vendor}`, sub: `${plural(e.n, 'parcel')} · ${money(e.value)} held up${e.cod ? ` · ${money(e.cod)} COD` : ''}`, days, tone: days >= 3 ? 'red' : 'amber', href: '/pickups' };
       });
   }
 
@@ -533,12 +540,65 @@ export class AgentService {
   /** Runs every minute from the job loop; sends each list once, inside its hour. */
   async routines(now = new Date()) {
     const h = Math.floor(istHour(now));
+    if (h === SUMMARY_HOUR) return this.daySummary(now);
     if (!(ROUTINE_HOURS as readonly number[]).includes(h) || closedReason(now)) return null;
     const brandId = await this.brands.currentBrandId();
     const key = `lists:${istDateKey(now)}:${h}`;
     const done = await this.prisma.agentMessage.findFirst({ where: { brandId, role: 'AGENT', data: { path: ['routine'], equals: key } } });
     if (done) return null;
     return this.sendLists(brandId, now, false, key);
+  }
+
+  /**
+   * 7 pm: who answered today, who stayed silent, and the money still held up,
+   * so the founder knows where to push tomorrow without reading every issue.
+   */
+  async daySummary(now = new Date(), force = false) {
+    const brandId = await this.brands.currentBrandId();
+    const key = `summary:${istDateKey(now)}`;
+    if (!force && (await this.prisma.agentMessage.findFirst({ where: { brandId, role: 'AGENT', data: { path: ['routine'], equals: key } } }))) return null;
+    const since = new Date(now.getTime() - istHour(now) * HOUR);
+    const [replies, silent, unpicked, late, closed] = await Promise.all([
+      this.prisma.issueEvent.findMany({ where: { flag: { brandId }, kind: 'PARTNER_REPLY', createdAt: { gte: since } }, select: { actorName: true } }),
+      this.prisma.redFlag.findMany({
+        where: { brandId, resolvedAt: null, waitingOn: { in: ['COURIER', 'VENDOR'] }, reminderCount: { gt: 0 } },
+        include: { courierContact: true, pickup: { include: { courier: true, warehouse: true } }, shipment: { include: { courier: true } } },
+      }),
+      this.unpicked(brandId, now),
+      this.lateInTransit(brandId, now),
+      this.prisma.redFlag.count({ where: { brandId, resolvedAt: { gte: since } } }),
+    ]);
+    const who = new Map<string, number>();
+    for (const r of replies) who.set(r.actorName, (who.get(r.actorName) ?? 0) + 1);
+    const quiet = new Map<string, number>();
+    const couriers = new Map((await this.prisma.courier.findMany()).map((c) => [c.code, c.name]));
+    for (const f of silent) {
+      const code = f.pickup?.courierCode ?? f.shipment?.courierCode ?? f.courierCode ?? f.courierContact?.courierCode;
+      const name = f.waitingOn === 'VENDOR' ? (f.pickup?.warehouse.name ?? 'Vendors') : ((code && couriers.get(code)) ?? 'Courier not set');
+      quiet.set(name, (quiet.get(name) ?? 0) + 1);
+    }
+    const held = [...unpicked, ...late].reduce((n, s) => n + Number(s.order.orderValue), 0);
+    const reply: Reply = {
+      body: `Today: ${plural(closed, 'issue')} solved, ${plural(replies.length, 'reply', 'replies')} from partners, ${plural(silent.length, 'issue')} still ignored. ${money(held)} of orders held up (${unpicked.length} not picked up, ${late.length} late).`,
+      groups: [
+        ...(quiet.size ? [{ title: 'Still silent after reminders', items: [...quiet].sort((a, b) => b[1] - a[1]).map(([n, c]) => ({ label: n, sub: plural(c, 'issue'), tone: 'red' as const, href: '/issues?waiting=COURIER' })) }] : []),
+        ...(who.size ? [{ title: 'Answered today', items: [...who].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, c]) => ({ label: n, sub: plural(c, 'reply', 'replies'), tone: 'green' as const })) }] : []),
+      ],
+    };
+    // Asked for by a person, it is not the 7 pm run: the 7 pm summary still goes out.
+    return this.say(brandId, reply, now, force ? { intent: 'summary' } : { routine: key, intent: 'summary' });
+  }
+
+  /** The Chase button on an issue: ask whoever owes the answer, right now. */
+  async chaseIssue(id: string, actor: Actor, now = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+    const f = await this.prisma.redFlag.findFirst({ where: { id, brandId, resolvedAt: null }, include: { pickup: { include: { courier: true, warehouse: true } }, shipment: { include: { order: true } } } });
+    if (!f) throw new NotFoundException('Open issue not found');
+    if (f.waitingOn !== 'COURIER' && f.waitingOn !== 'VENDOR') throw new BadRequestException('This issue is waiting on us, not on a partner');
+    const what = f.pickup ? `the ${f.pickup.courier.name} pickup at ${f.pickup.warehouse.name}` : f.shipment ? `order #${f.shipment.order.orderNumber} (${f.shipment.awb})` : f.title;
+    const body = f.promiseAt && f.promiseAt < now ? `You promised ${what} by ${timeLabel(f.promiseAt, now)}. That time has passed. Give a new time or the result.` : `Following up on ${what}. Reply with a name and a time, or the result.`;
+    await this.issues.act(id, { kind: 'ask', party: f.waitingOn, body }, { id: actor.id, name: AGENT_NAME, role: actor.role }, now);
+    return this.say(brandId, { body: `${actor.name} asked me to chase ${what}. Message sent; I'll check back on the clock.`, items: [{ label: f.title, sub: PARTY_LABEL[f.waitingOn as Party], tone: 'amber', href: `/issues/${id}` }], actions: 1 }, now);
   }
 
   /**

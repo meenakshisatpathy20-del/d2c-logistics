@@ -7,7 +7,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { type AgentItem, type AgentMsg, askAgent, decideAgent, getAgentFeed } from "@/lib/api";
 import { useLive } from "@/lib/use-live";
 
-const QUICK = ["What's pending today?", "Show ageing shipments", "Chase all stuck pickups", "Send the 9 am lists now"];
+const QUICK = ["What's pending today?", "Show ageing shipments", "Chase all stuck pickups", "Today's summary"];
 
 const toneDot: Record<string, string> = {
   red: "bg-flag-red",
@@ -210,7 +210,8 @@ export function AgentChat() {
             <li><b className="text-ink">9 am & 6 pm</b> pending list to every courier, with days waiting</li>
             <li><b className="text-ink">Every 2 hours</b> reminds whoever owes an answer</li>
             <li><b className="text-ink">Promise time passes</b> asks again, then their manager</li>
-            <li><b className="text-ink">Ignored 3 times</b> offers a courier switch for your OK</li>
+            <li><b className="text-ink">Ignored 3 times</b> moves waiting parcels to another courier and tells you here</li>
+            <li><b className="text-ink">7 pm</b> summary: who answered, who stayed silent, ₹ held up</li>
           </ul>
         </div>
         <div className="rounded-2xl border border-line bg-white p-5">
