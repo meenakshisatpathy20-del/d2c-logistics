@@ -253,7 +253,8 @@ export class PickupsService {
   ): Promise<{ id: string; courierName: string } | null> {
     const from = await this.prisma.pickup.findUniqueOrThrow({
       where: { id: pickupId },
-      include: { warehouse: true, courier: true, shipments: { where: { status: { not: 'CANCELLED' } }, include: { order: true } } },
+      // Only parcels still waiting: one already picked up is with a courier and must never be re-booked.
+      include: { warehouse: true, courier: true, shipments: { where: { status: { in: ['BOOKED', 'PICKUP_SCHEDULED'] } }, include: { order: true } } },
     });
     let target: { id: string; courierName: string } | null = null;
 

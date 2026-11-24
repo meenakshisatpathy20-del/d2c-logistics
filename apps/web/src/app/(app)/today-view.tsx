@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { Check, CircleDashed, Clock, Loader2, X } from "lucide-react";
 import { WaitingPanel } from "@/components/home/waiting-panel";
 import { StepCards } from "@/components/home/step-cards";
+import { AgentStrip } from "@/components/home/agent-strip";
 import { BrandLogo, OUR_BRANDS } from "@/components/ui/logo";
 import { Badge, Card, DemoBadge } from "@/components/ui/primitives";
 import { getToday, type SlotState, type TodayData } from "@/lib/api";
@@ -80,6 +81,7 @@ export function TodayView() {
       </div>
 
       <StepCards pulse={data.pulse} />
+      <AgentStrip />
 
       <div className="grid gap-6 xl:grid-cols-[400px_1fr] [&>*]:min-w-0">
         <WaitingPanel />

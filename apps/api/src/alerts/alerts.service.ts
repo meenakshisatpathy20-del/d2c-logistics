@@ -102,7 +102,7 @@ export class AlertsService {
           to: `+91 ${m.phone}`,
           kind: m.kind,
           title: m.title,
-          body: `D2C Logistics: ${plain(m.title)}.${m.link ? ` Open: ${fullLink(m.link)}` : ''}`,
+          body: `EcomNext: ${plain(m.title)}.${m.link ? ` Open: ${fullLink(m.link)}` : ''}`,
           link: m.link,
           dedupeKey: `${m.dedupeKey}:sms`,
           now: m.now,
@@ -125,7 +125,7 @@ export class AlertsService {
       to: `+91 ${user.phone}`,
       kind: m.kind,
       title: m.title,
-      body: `D2C Logistics: ${plain(m.title)}.${m.link ? ` Open: ${fullLink(m.link)}` : ''}`,
+      body: `EcomNext: ${plain(m.title)}.${m.link ? ` Open: ${fullLink(m.link)}` : ''}`,
       link: m.link,
       dedupeKey: `${m.key}:sms`,
       now: m.now,
@@ -282,7 +282,7 @@ export class AlertsService {
 
   static summaryText(s: Awaited<ReturnType<AlertsService['buildSummary']>>) {
     const lines = [
-      `D2C Logistics · ${s.day}`,
+      `EcomNext · ${s.day}`,
       `Booked ${s.booked} · picked up ${s.pickedUp} · delivered ${s.delivered} · RTO started ${s.rtoStarted}`,
       `Pickups ${s.pickups.done}/${s.pickups.due} done${s.pickups.missed ? `, ${s.pickups.missed} missed` : ''}`,
       `Stuck (no scan 48 h): ${s.stuck} · issues open: ${s.redFlagsOpen} (${s.critical} critical, ${s.overdue} overdue)`,

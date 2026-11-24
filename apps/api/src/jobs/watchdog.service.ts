@@ -65,7 +65,7 @@ export class WatchdogService {
         orderId: o.id,
         type: 'NOT_BOOKED',
         severity: 'WARNING',
-        title: `Order #${o.orderNumber} not booked for ${hours} hours`,
+        title: `Order #${o.orderNumber} not booked for ${hours >= 48 ? `${Math.floor(hours / 24)} days` : `${hours} hours`}`,
         message: `${o.customerName}, ${o.city || o.pincode} · ${fmtInr(Number(o.orderValue))} ${o.paymentMode} · ships from ${o.pickupWarehouse.name}`,
         action: 'Book it or cancel it',
         dueAt: new Date(now.getTime() + 4 * HOUR),
@@ -290,7 +290,7 @@ export class WatchdogService {
         const note = `Also: ${WATCHDOG[r.type]?.label ?? r.title}`;
         if (!other.events.some((e) => e.body.startsWith(note))) {
           await this.prisma.issueEvent.create({
-            data: { flagId: other.id, kind: 'SYSTEM', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `${note} (${r.title.toLowerCase()}).`, createdAt: now },
+            data: { flagId: other.id, kind: 'SYSTEM', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `${note} (${r.title.toLowerCase()}).`, createdAt: now },
           });
           if (r.severity === 'CRITICAL' && other.severity !== 'CRITICAL') await this.prisma.redFlag.update({ where: { id: other.id }, data: { severity: 'CRITICAL' } });
         }
@@ -328,7 +328,7 @@ export class WatchdogService {
       const result = await outcome(f);
       await this.prisma.redFlag.update({ where: { id: f.id }, data: { resolvedAt: now, outcome: result, waitingOn: null } });
       await this.prisma.issueEvent.create({
-        data: { flagId: f.id, kind: 'RESOLVED', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Closed by itself: ${result}.`, createdAt: now },
+        data: { flagId: f.id, kind: 'RESOLVED', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `Closed by itself: ${result}.`, createdAt: now },
       });
     }
   }

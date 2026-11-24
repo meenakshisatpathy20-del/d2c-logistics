@@ -225,7 +225,7 @@ export class ShipmentsService {
     const open = await this.prisma.redFlag.findFirst({ where: { brandId, type: 'BOOKING_FAILED', courierCode: e.courierCode, resolvedAt: null } });
     if (open) {
       await this.prisma.issueEvent.create({
-        data: { flagId: open.id, kind: 'SYSTEM', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Failed again for order #${orderNumber}: ${e.reason}`, createdAt: now },
+        data: { flagId: open.id, kind: 'SYSTEM', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `Failed again for order #${orderNumber}: ${e.reason}`, createdAt: now },
       });
       return;
     }

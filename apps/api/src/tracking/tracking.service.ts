@@ -158,7 +158,7 @@ export class TrackingService {
         await this.prisma.redFlag.update({ where: { id: open.id }, data: { title: f.title, ...(nowLost ? { action: f.action, severity: 'CRITICAL' } : {}) } });
         if (nowLost) {
           await this.prisma.issueEvent.create({
-            data: { flagId: open.id, kind: 'SYSTEM', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `${LIKELY_LOST_DAYS} days without a scan: treat it as lost. Ask the courier to declare it lost and raise the claim.`, createdAt: f.now },
+            data: { flagId: open.id, kind: 'SYSTEM', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `${LIKELY_LOST_DAYS} days without a scan: treat it as lost. Ask the courier to declare it lost and raise the claim.`, createdAt: f.now },
           });
         }
       }

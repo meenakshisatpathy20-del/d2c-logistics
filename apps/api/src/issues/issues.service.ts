@@ -197,7 +197,7 @@ export class IssuesService {
         where: { id: f.id },
         data: { waitingOn: f.waitingOn ?? firstTurn(f.type), waitingSince: f.createdAt, ...(contact ? { courierContactId: contact.id } : {}) },
       });
-      await this.event(f.id, { kind: 'SYSTEM', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Raised automatically: ${f.title}. ${f.message}`, at: f.createdAt });
+      await this.event(f.id, { kind: 'SYSTEM', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `Raised automatically: ${f.title}. ${f.message}`, at: f.createdAt });
       await this.tellFirst(f.id, brandId, now);
     }
     return fresh.length;
@@ -224,7 +224,7 @@ export class IssuesService {
       now,
     });
     await this.prisma.redFlag.update({ where: { id }, data: { lastReminderAt: now } });
-    await this.event(id, { kind: 'ASK', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Sent to ${target.name} in ${this.where(f.waitingOn)}.`, via: 'APP', at: now });
+    await this.event(id, { kind: 'ASK', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `Sent to ${target.name} in ${this.where(f.waitingOn)}.`, via: 'APP', at: now });
   }
 
   /** A promised time passed with the issue still open: counted, and the reminders start again. */
@@ -238,7 +238,7 @@ export class IssuesService {
       });
       await this.event(f.id, {
         kind: 'PROMISE_BROKEN',
-        actorName: 'D2C Logistics',
+        actorName: 'EcomNext',
         actorParty: 'SYSTEM',
         body: `Promise missed: "${f.promiseText ?? 'promised time'}" by ${fmt(f.promiseAt!)}. Still waiting on ${this.turnPerson(f)}.`,
         at: now,
@@ -275,7 +275,7 @@ export class IssuesService {
         now,
       });
       await this.prisma.redFlag.update({ where: { id: f.id }, data: { reminderCount: count, lastReminderAt: now } });
-      await this.event(f.id, { kind: 'REMINDER', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Reminder ${count} sent to ${target.name} in ${this.where(f.waitingOn)}. No reply for ${waitedH} h.`, via: 'APP', at: now });
+      await this.event(f.id, { kind: 'REMINDER', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `Reminder ${count} sent to ${target.name} in ${this.where(f.waitingOn)}. No reply for ${waitedH} h.`, via: 'APP', at: now });
       if (count === IGNORED_BEFORE_MANAGER) await this.toManager(f, brandId, count, now);
       if (count >= IGNORED_BEFORE_AUTO_SWITCH && f.waitingOn === 'COURIER') await this.stopWaiting(f, count, now);
       n++;
@@ -315,17 +315,17 @@ export class IssuesService {
     if (!f.pickupId || groupOf(f.type) !== 'PICKUPS') return;
     if (!['SCHEDULED', 'CONFIRMED', 'MISSED'].includes(f.pickup?.status ?? '')) return;
     try {
-      const r = await this.pickups.switchCourier(f.pickupId, `${ignored} reminders ignored`, { id: '', name: 'D2C Logistics' }, now);
+      const r = await this.pickups.switchCourier(f.pickupId, `${ignored} reminders ignored`, { id: '', name: 'EcomNext' }, now);
       await this.prisma.redFlag.update({ where: { id: f.id }, data: { waitingOn: 'OURS', waitingSince: now, reminderCount: 0, lastReminderAt: null } });
       await this.event(f.id, {
         kind: 'ACTION',
-        actorName: 'D2C Logistics',
+        actorName: 'EcomNext',
         actorParty: 'SYSTEM',
         body: `${ignored} reminders ignored, so we stopped waiting: parcels moved from ${r.from} to ${r.to}, pickup ${r.slot}. The old booking was cancelled. Close this with who was at fault.`,
         at: now,
       });
     } catch (e) {
-      await this.event(f.id, { kind: 'SYSTEM', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `Could not move the parcels by itself: ${(e as Error).message}. Switch the courier from here.`, at: now });
+      await this.event(f.id, { kind: 'SYSTEM', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `Could not move the parcels by itself: ${(e as Error).message}. Switch the courier from here.`, at: now });
     }
   }
 
@@ -349,7 +349,7 @@ export class IssuesService {
           now,
         });
         await this.prisma.redFlag.update({ where: { id: f.id }, data: { courierContactId: boss.id } });
-        await this.event(f.id, { kind: 'ESCALATED', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `${f.courierContact.name} ignored ${ignored} reminders. Handed to ${boss.name} (${ROLE_LABEL[boss.role]}).`, at: now });
+        await this.event(f.id, { kind: 'ESCALATED', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `${f.courierContact.name} ignored ${ignored} reminders. Handed to ${boss.name} (${ROLE_LABEL[boss.role]}).`, at: now });
         return;
       }
     }
@@ -368,7 +368,7 @@ export class IssuesService {
         now,
       });
     }
-    await this.event(f.id, { kind: 'ESCALATED', actorName: 'D2C Logistics', actorParty: 'SYSTEM', body: `${ignored} reminders ignored by ${this.turnPerson(f)}. ${owner?.name ?? 'Our team'} alerted to call and log it.`, at: now });
+    await this.event(f.id, { kind: 'ESCALATED', actorName: 'EcomNext', actorParty: 'SYSTEM', body: `${ignored} reminders ignored by ${this.turnPerson(f)}. ${owner?.name ?? 'Our team'} alerted to call and log it.`, at: now });
   }
 
   // ---------- Inbox ----------
@@ -811,7 +811,7 @@ export class IssuesService {
     const inside = slotFits(p.slotStart, p.warehouse);
     await this.event(flagId, {
       kind: 'SYSTEM',
-      actorName: 'D2C Logistics',
+      actorName: 'EcomNext',
       actorParty: 'SYSTEM',
       body: inside
         ? `Checked: the ${slotLabel(p.slotStart)} slot is inside the declared hours of ${p.warehouse.name} (${hoursLabel(p.warehouse)}). A "closed" claim needs a photo with time and place from the executive.`

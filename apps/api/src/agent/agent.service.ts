@@ -477,7 +477,7 @@ export class AgentService {
     if (!courier && !vendor) return { body: 'Which pickup? Say for example "switch Ekart at Star India".' };
     const p = await this.prisma.pickup.findFirst({
       where: { brandId, status: { in: ['SCHEDULED', 'CONFIRMED', 'MISSED'] }, parcelCount: { gt: 0 }, ...(courier ? { courierCode: courier.code } : {}), ...(vendor ? { warehouseId: vendor.id } : {}) },
-      include: { courier: true, warehouse: true, _count: { select: { shipments: { where: { status: { not: 'CANCELLED' } } } } } },
+      include: { courier: true, warehouse: true, _count: { select: { shipments: { where: { status: { in: ['BOOKED', 'PICKUP_SCHEDULED'] } } } } } },
       orderBy: { slotStart: 'asc' },
     });
     if (!p || !p._count.shipments) return { body: `No open pickup${courier ? ` with ${courier.name}` : ''}${vendor ? ` at ${vendor.name}` : ''} to switch.` };
