@@ -128,6 +128,9 @@ describe('Days 26-27: triage agent and payment guard (e2e)', () => {
     const unknown = await founder.post('/api/payments/proof').send({ orderNumber: `E2E-${run}-D`, utr: '999988887777' }).expect(200);
     expect(unknown.body.verdict).toBe('NOT_FOUND');
     expect(unknown.body.findings.join(' ')).toMatch(/not reaching us/);
+    const rows = (await founder.get(`/api/orders?q=E2E-${run}-D`).expect(200)).body.rows;
+    expect(rows[0].paymentHold?.status).toBe('MISMATCH');
+    expect(rows[0].flag?.title).toMatch(/wrong account/);
     const g = await founder.get('/api/payments/guard').expect(200);
     expect(g.body.held.find((h: { orderNumber: string }) => h.orderNumber === `E2E-${run}-D`)?.status).toBe('MISMATCH');
   });
@@ -160,8 +163,9 @@ describe('Days 26-27: triage agent and payment guard (e2e)', () => {
     expect(f.promiseAt).not.toBeNull();
     expect(f.waitingOn).toBe('COURIER');
     expect(f.events.some((e) => e.via === 'WHATSAPP' && e.actorParty === 'COURIER')).toBe(true);
-    const courierCase = await prisma.redFlag.findFirstOrThrow({ where: { courierCode: 'XPRESSBEES', shipmentId: null, pickupId: null, resolvedAt: null, title: { contains: 'AWB' } } });
+    const courierCase = await prisma.redFlag.findFirstOrThrow({ where: { courierCode: 'XPRESSBEES', shipmentId: null, pickupId: null, resolvedAt: null, message: { contains: 'AWBs:' } } });
     expect(courierCase.message).toContain('3757311646299');
+    expect(courierCase.title).toContain('3757311646299');
 
     const again = await founder.post('/api/agent/triage').send({ text: chat, courierCode: 'XPRESSBEES' }).expect(200);
     expect(again.body).toMatchObject({ read: 0, skipped: 3, opened: 0 });

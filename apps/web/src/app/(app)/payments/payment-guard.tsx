@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { FileUp, ShieldCheck, ShieldAlert } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { type ChangeEvent, useState } from "react";
 import { Badge, Button, Card, CardHeader, Field, inputClass, type Tone } from "@/components/ui/primitives";
 import { checkPaymentProof, getPaymentGuard, importStatement, type ProofCheck, setPayees } from "@/lib/api";
@@ -33,7 +34,9 @@ export function PaymentGuardPanel() {
   const [csv, setCsv] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [proof, setProof] = useState({ orderNumber: "", utr: "", dataUrl: "" });
+  // Opened from a payment issue: the order is filled in, ready for its screenshot or UTR.
+  const fromIssue = useSearchParams().get("check") ?? "";
+  const [proof, setProof] = useState({ orderNumber: fromIssue, utr: "", dataUrl: "" });
   const [check, setCheck] = useState<ProofCheck | null>(null);
   const [accounts, setAccounts] = useState<string | null>(null);
 
@@ -124,7 +127,7 @@ export function PaymentGuardPanel() {
       {msg ? <p className="text-[13px] font-medium text-flag-red">{msg}</p> : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="p-5">
+        <Card className="scroll-mt-20 p-5" id="import">
           <h2 className="text-[15px] font-semibold text-ink">Import today&apos;s payments</h2>
           <p className="mt-1 text-[13px] text-muted">
             The gateway export or the bank / UPI statement (CSV). Needs order, UTR or payment ID, and amount; refunds and &ldquo;paid to&rdquo; columns are read if present. Held
@@ -163,7 +166,7 @@ export function PaymentGuardPanel() {
           </div>
         </Card>
 
-        <Card className="p-5">
+        <Card className="scroll-mt-20 p-5" id="proof">
           <h2 className="text-[15px] font-semibold text-ink">Customer says &ldquo;I paid&rdquo;</h2>
           <p className="mt-1 text-[13px] text-muted">Add their screenshot or the UTR. It is checked against our records: whose account it went to, whether it arrived, and whether it was refunded.</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">

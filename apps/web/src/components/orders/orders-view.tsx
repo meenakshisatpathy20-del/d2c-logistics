@@ -535,6 +535,16 @@ function OrdersTable({
 function RowAction({ row, onOpen }: { row: OrderRow; onOpen: () => void }) {
   const primary = "inline-flex h-8 items-center whitespace-nowrap rounded-lg bg-brand-orange px-3 text-[12.5px] font-semibold text-white hover:bg-brand-orange-dark";
   const secondary = "inline-flex h-8 items-center whitespace-nowrap rounded-lg border border-line bg-white px-3 text-[12.5px] font-medium text-ink-2 hover:bg-page";
+  if (row.paymentHold && row.status === "UNBOOKED")
+    return row.flag ? (
+      <a className={primary} href={`/issues/${row.flag.id}`} title={row.paymentHold.reason ?? undefined}>
+        Payment held
+      </a>
+    ) : (
+      <button className={primary} onClick={onOpen}>
+        Payment held
+      </button>
+    );
   if (row.status === "UNBOOKED")
     return (
       <button className={primary} onClick={onOpen}>

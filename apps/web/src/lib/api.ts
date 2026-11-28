@@ -267,6 +267,8 @@ export type OrderRow = {
   rtoRisk: "LOW" | "MEDIUM" | "HIGH" | null;
   canCancel: boolean;
   labelUrl: string | null;
+  /** Set when the payment check is holding the order: money not in our account, wrong QR or refunded. */
+  paymentHold: { status: "PENDING" | "MISMATCH" | "REFUNDED"; reason: string | null } | null;
 };
 
 export type OrdersPage = {
