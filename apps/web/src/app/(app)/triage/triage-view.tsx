@@ -172,7 +172,7 @@ export function TriageView() {
                 <div className="flex items-center gap-1.5 text-muted">
                   <span className="font-semibold text-ink-2">{m.sender}</span>
                   <span>· {when(m.at)}</span>
-                  {m.readBy === "CLAUDE" ? <Badge tone="blue">AI read</Badge> : null}
+                  {m.readBy === "AI" ? <Badge tone="blue">AI read</Badge> : null}
                 </div>
                 <p className="line-clamp-2 break-words text-ink-2">{m.body}</p>
                 {m.flagIds[0] ? (

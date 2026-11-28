@@ -615,7 +615,7 @@ model ChatMessage {
   promiseAt   DateTime?
   flagIds     String[]
   unmatched   String[] // AWBs not on EcomNext (still booked elsewhere)
-  readBy      String // RULES or CLAUDE
+  readBy      String // RULES or AI
   hash        String
   createdAt   DateTime @default(now())
 

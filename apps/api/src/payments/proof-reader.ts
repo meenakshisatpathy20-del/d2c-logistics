@@ -3,11 +3,11 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 
 /**
- * Reads a payment screenshot a customer sends ("I paid, see"). Claude only
+ * Reads a payment screenshot a customer sends ("I paid, see"). The AI model only
  * copies what is written on it; whether we were paid is decided by the payment
  * ledger, never by the picture. That is the point: a screenshot shows money
  * leaving the customer, not money reaching us, and not that it stayed.
- * Off unless ANTHROPIC_API_KEY is set.
+ * Off unless ANTHROPIC_API_KEY and AGENT_MODEL are set.
  */
 const ProofSchema = z.object({
   utr: z.string().nullable().describe('UTR / UPI reference / transaction ID, digits and letters only'),
@@ -22,12 +22,12 @@ export type ProofRead = z.infer<typeof ProofSchema>;
 let client: Anthropic | null = null;
 
 export async function readProof(dataUrl: string): Promise<ProofRead | null> {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
+  if (!process.env.ANTHROPIC_API_KEY || !process.env.AGENT_MODEL) return null;
   const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/.exec(dataUrl);
   if (!m) return null;
   client ??= new Anthropic();
   const res = await client.messages.parse({
-    model: process.env.AGENT_MODEL ?? 'claude-opus-5-5',
+    model: process.env.AGENT_MODEL,
     max_tokens: 1024,
     system: 'You copy the details from an Indian UPI or bank payment screenshot exactly as shown. Do not guess; use null when a field is not visible.',
     messages: [

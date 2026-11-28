@@ -71,8 +71,8 @@ Everyone can change their password in Settings; an admin can reset a forgotten o
   statement (Payments → Import). A held order that is now paid books by itself.
 - A refund before pickup cancels the booking; after pickup it raises an urgent
   issue to get the parcel back or the money in.
-- Payments → "Customer says I paid": checks a screenshot (read by Claude when
-  `ANTHROPIC_API_KEY` is set) or a UTR against our records. A payment into any
+- Payments → "Customer says I paid": checks a screenshot (read by the AI model
+  when `ANTHROPIC_API_KEY` and `AGENT_MODEL` are set) or a UTR against our records. A payment into any
   account not listed under **Our accounts** is a wrong-QR payment.
 - `PAYMENT_GUARD=off` turns the check off (emergencies only; the tests use it).
 

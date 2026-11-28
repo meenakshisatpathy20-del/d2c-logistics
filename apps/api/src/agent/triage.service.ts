@@ -126,10 +126,10 @@ export class TriageService {
       let r: Reading = read(l.body, l.sentAt);
       let readBy = 'RULES';
       if (r.kind === 'INFO' && l.body.length >= 12) {
-        const ai = await llmTriage(l.body, l.sentAt).catch((e) => (this.log.warn(`Claude triage failed: ${(e as Error).message}`), null));
+        const ai = await llmTriage(l.body, l.sentAt).catch((e) => (this.log.warn(`AI triage failed: ${(e as Error).message}`), null));
         if (ai) {
           r = { ...r, ...ai, refs: r.refs };
-          readBy = 'CLAUDE';
+          readBy = 'AI';
         }
       }
       const own = r.refs.length > 0;

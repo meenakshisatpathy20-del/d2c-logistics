@@ -69,7 +69,7 @@ export function amountIn(text: string): number | null {
 /**
  * Reads what the team typed into an intent, with plain rules first: they are
  * instant, free and predictable. Only a message the rules cannot read goes to
- * Claude (when a key is set), and Claude only picks the intent; the code does
+ * the AI model (when one is set up), and it only picks the intent; the code does
  * the work and checks it, so a model mistake cannot move a parcel.
  */
 export function readIntent(text: string, now: Date): Intent {
@@ -144,7 +144,7 @@ export class AgentService {
     const brandId = await this.brands.currentBrandId();
     await this.prisma.agentMessage.create({ data: { brandId, userId: actor.id, role: 'USER', body: text, createdAt: now } });
     let intent = readIntent(text, now);
-    if (intent.kind === 'unknown') intent = (await llmIntent(text, now).catch((e) => (this.log.warn(`Claude intent failed: ${(e as Error).message}`), null))) ?? intent;
+    if (intent.kind === 'unknown') intent = (await llmIntent(text, now).catch((e) => (this.log.warn(`AI intent failed: ${(e as Error).message}`), null))) ?? intent;
     if (intent.kind === 'summary') return (await this.daySummary(now, true))!;
     let reply: Reply;
     try {
