@@ -416,7 +416,17 @@ function QuickActions({ issue, busy, run }: { issue: IssueDetail; busy: boolean;
             ) : null}
           </>
         ) : null}
-        {issue.order ? (
+        {issue.order && issue.type.startsWith("PAYMENT_") ? (
+          <>
+            <Link href={`/payments?check=${encodeURIComponent(issue.order.orderNumber)}#proof`} className="flex h-10 items-center gap-2 rounded-lg border border-line px-3 text-[13px] font-medium text-ink-2 hover:bg-page">
+              <FileText size={15} /> Check the customer&apos;s screenshot or UTR
+            </Link>
+            <Link href="/payments#import" className="flex h-10 items-center gap-2 rounded-lg border border-line px-3 text-[13px] font-medium text-ink-2 hover:bg-page">
+              <FileText size={15} /> Import today&apos;s payments
+            </Link>
+            <p className="text-[12px] text-muted">It books by itself once the money is in our account. Nobody needs to press Ship.</p>
+          </>
+        ) : issue.order ? (
           <Link href={`/orders/${issue.order.id}`} className="flex h-10 items-center gap-2 rounded-lg border border-line px-3 text-[13px] font-medium text-ink-2 hover:bg-page">
             <FileText size={15} /> Open order #{issue.order.orderNumber} to book it
           </Link>

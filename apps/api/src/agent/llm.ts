@@ -5,11 +5,11 @@ import type { Intent } from './agent.service.js';
 import { parseWhen } from './when.js';
 
 /**
- * Claude reads a message the plain rules could not, and only names the intent
+ * The AI model reads a message the plain rules could not, and only names the intent
  * and its details. The code then does the work with the same checks as a
  * button, so a wrong guess can at worst give a wrong answer, never move a parcel
  * on its own (switching a courier still waits for a person's OK).
- * Off unless ANTHROPIC_API_KEY is set.
+ * Off unless ANTHROPIC_API_KEY and AGENT_MODEL are set.
  */
 const IntentSchema = z.object({
   kind: z.enum(['help', 'pending', 'ageing', 'chase', 'status', 'book', 'switch', 'credit', 'lists', 'unknown']),
@@ -30,10 +30,10 @@ help, unknown. Messages may mix Hindi and English.`;
 let client: Anthropic | null = null;
 
 export async function llmIntent(text: string, now: Date): Promise<Intent | null> {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
+  if (!process.env.ANTHROPIC_API_KEY || !process.env.AGENT_MODEL) return null;
   client ??= new Anthropic();
   const res = await client.messages.parse({
-    model: process.env.AGENT_MODEL ?? 'claude-opus-5-5',
+    model: process.env.AGENT_MODEL,
     max_tokens: 1024,
     system: SYSTEM,
     messages: [{ role: 'user', content: text }],
@@ -74,12 +74,12 @@ DONE (says it is done: picked up, delivered, marked RTO), CLAIM (an excuse: ware
 MONEY (money owed, credit, refund, COD remittance), BLOCKED (bookings or business on hold), REPLY (any other answer), INFO (chit-chat, greetings).
 Pick the shipment problem it is about, or null.`;
 
-/** Claude reads a courier-chat message the plain rules could not place. Off without ANTHROPIC_API_KEY. */
+/** The AI model reads a courier-chat message the plain rules could not place. Off unless ANTHROPIC_API_KEY and AGENT_MODEL are set. */
 export async function llmTriage(text: string, now: Date): Promise<{ kind: 'ASK' | 'PROMISE' | 'DONE' | 'CLAIM' | 'MONEY' | 'BLOCKED' | 'REPLY' | 'INFO'; type: string | null; promiseAt: Date | null } | null> {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
+  if (!process.env.ANTHROPIC_API_KEY || !process.env.AGENT_MODEL) return null;
   client ??= new Anthropic();
   const res = await client.messages.parse({
-    model: process.env.AGENT_MODEL ?? 'claude-opus-5-5',
+    model: process.env.AGENT_MODEL,
     max_tokens: 512,
     system: TRIAGE_SYSTEM,
     messages: [{ role: 'user', content: text.slice(0, 2000) }],

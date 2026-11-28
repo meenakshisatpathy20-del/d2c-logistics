@@ -126,10 +126,10 @@ export class TriageService {
       let r: Reading = read(l.body, l.sentAt);
       let readBy = 'RULES';
       if (r.kind === 'INFO' && l.body.length >= 12) {
-        const ai = await llmTriage(l.body, l.sentAt).catch((e) => (this.log.warn(`Claude triage failed: ${(e as Error).message}`), null));
+        const ai = await llmTriage(l.body, l.sentAt).catch((e) => (this.log.warn(`AI triage failed: ${(e as Error).message}`), null));
         if (ai) {
           r = { ...r, ...ai, refs: r.refs };
-          readBy = 'CLAUDE';
+          readBy = 'AI';
         }
       }
       const own = r.refs.length > 0;
@@ -286,13 +286,18 @@ export class TriageService {
     const list = awbs.length ? ` AWBs: ${awbs.join(', ')}.` : '';
     if (open) {
       await this.issues.logChat(open.id, { party, who: l.sender, body: `${l.body}${list}`.slice(0, 2000), kind: r.kind, promiseAt: r.promiseAt, at: l.sentAt }, now);
+      if (awbs.length) {
+        // The case title always names every AWB on it, so the courier sees which parcels without opening it.
+        const known = [...new Set([...(/AWBs?: ([\d,\s A-Z-]+)/.exec(open.message)?.[1] ?? '').split(/[,\s]+/).filter((x) => x.length >= 8), ...awbs])];
+        await this.prisma.redFlag.update({ where: { id: open.id }, data: { title: this.awbTitle(courier.name, type, known), message: `${open.message.replace(/ AWBs?: [\d,\s A-Z-]+\.?$/, '')} AWBs: ${known.join(', ')}.`.slice(0, 2000) } });
+      }
       return { id: open.id, created: false };
     }
     if (r.kind === 'DONE') return null;
     const raised = (await this.issues.raise(
       {
         type,
-        title: awbs.length ? `${courier.name}: ${plural(awbs.length, 'AWB')}, ${RAISED[type].label.toLowerCase()}` : undefined,
+        title: awbs.length ? this.awbTitle(courier.name, type, awbs) : undefined,
         body: `From the ${courier.name} WhatsApp group, ${l.sender}: ${l.body}${list}`.slice(0, 2000),
         courierCode: courier.code,
         waitingOn: party === 'OURS' ? 'COURIER' : 'OURS',
@@ -302,6 +307,12 @@ export class TriageService {
     )) as { id: string };
     if (party !== 'OURS' && r.promiseAt) await this.issues.logChat(raised.id, { party, who: l.sender, body: l.body, kind: r.kind, promiseAt: r.promiseAt, at: l.sentAt }, now);
     return { id: raised.id, created: true };
+  }
+
+  /** "Xpressbees: pickup pending · 375731260024, 375731164629 +1" */
+  private awbTitle(courier: string, type: string, awbs: string[]) {
+    const shown = awbs.slice(0, 2).join(', ');
+    return `${courier}: ${RAISED[type].label.toLowerCase()} · ${shown}${awbs.length > 2 ? ` +${awbs.length - 2}` : ''}`.slice(0, 120);
   }
 
   /** The Resolve Hub ledger: what was read, newest first. */

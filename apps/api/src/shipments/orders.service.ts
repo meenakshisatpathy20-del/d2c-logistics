@@ -112,6 +112,8 @@ export class OrdersService {
         where,
         include: {
           pickupWarehouse: true,
+          // An order the payment check is holding: its payment issue, so the row says why it is not shipping.
+          redFlags: { where: { resolvedAt: null, type: { startsWith: 'PAYMENT_' } }, include: { owner: true }, take: 1 },
           shipments: {
             where: LIVE,
             orderBy: { createdAt: 'desc' },
@@ -140,7 +142,8 @@ export class OrdersService {
       counts: Object.fromEntries(ORDER_TABS.map((t, i) => [t, counts[i]])) as Record<OrderTab, number>,
       rows: rows.map((o) => {
         const s = o.shipments[0];
-        const flag = s?.redFlags[0] ?? s?.pickup?.redFlags[0] ?? null;
+        const flag = o.redFlags[0] ?? s?.redFlags[0] ?? s?.pickup?.redFlags[0] ?? null;
+        const held = ['PENDING', 'MISMATCH', 'REFUNDED'].includes(o.paymentStatus ?? '');
         const lane =
           o.status === 'CANCELLED'
             ? { lane: 'CANCELLED', note: 'Cancelled', tone: 'grey' }
@@ -153,7 +156,9 @@ export class OrdersService {
                   lastScanPlace: s.events[0]?.location,
                   courier: s.courier.name,
                 })
-              : laneFor({ status: 'UNBOOKED' });
+              : held
+                ? { lane: 'PROBLEM', note: o.paymentNote ?? 'Payment on hold', tone: 'red' }
+                : laneFor({ status: 'UNBOOKED' });
         return {
           id: o.id,
           shipmentId: s?.id ?? null,
@@ -179,6 +184,7 @@ export class OrdersService {
           rtoRisk: riskLevel(o.rtoRisk ?? this.estimateRisk(o)),
           canCancel: o.status !== 'CANCELLED' && (!s || PRE_PICKUP.includes(s.status)),
           labelUrl: s ? `/api/shipments/${s.id}/label.pdf` : null,
+          paymentHold: held ? { status: o.paymentStatus, reason: o.paymentNote } : null,
         };
       }),
     };

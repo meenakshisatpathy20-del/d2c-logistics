@@ -509,11 +509,15 @@ function SingleOrder({ warehouses }: { warehouses: Warehouse[] }) {
                   <span className="font-semibold text-ink">Advance paid online</span>
                   {value > 0 && advance > 0 ? ` · ${formatINR(advance)} paid at checkout, courier collects ${formatINR(collect)}` : " · ₹49 below ₹1,000, ₹99 from ₹1,000"}
                   <span className="mt-0.5 block text-xs text-muted">
-                    Same rule as D2C Mall. Kept if the customer refuses at the door; it covers two-way shipping.
+                    Same rule as D2C Mall. Kept if the customer refuses at the door; it covers two-way shipping. It must show in our payment records before the order ships.
                   </span>
                 </span>
               </label>
-            ) : null}
+            ) : (
+              <p className="rounded-xl border border-brand-blue/20 bg-brand-blue-soft/50 px-4 py-2.5 text-[12.5px] leading-snug text-ink-2 sm:col-span-2">
+                <span className="font-semibold text-ink">Payment check:</span> a prepaid order books only when its money is in our own account and not refunded. If it is not there yet, the order is held and books by itself when the payment arrives.
+              </p>
+            )}
           </div>
         </Step>
 
