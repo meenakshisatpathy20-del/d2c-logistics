@@ -29,7 +29,7 @@ describe('API (e2e)', () => {
       .get('/api/health')
       .expect(200)
       .expect((r) => {
-        expect(r.body).toMatchObject({ status: 'ok', database: 'up', jobs: { status: 'running' } });
+        expect(r.body).toMatchObject({ status: 'ok', database: 'up', jobs: { status: process.env.JOBS_ENABLED === 'false' ? 'off' : 'running' } });
       });
   });
 

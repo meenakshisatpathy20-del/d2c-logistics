@@ -7,6 +7,8 @@ import type { BookOrder, BulkBook } from './booking.schema.js';
 import { initials, laneFor } from './lanes.js';
 import { rtoRisk } from '../common/rto-risk.js';
 import { openSlot } from '../common/open-slot.js';
+import { guardOn, type GuardResult } from '../payments/payment-guard.js';
+import { PaymentLedgerService } from '../payments/payment-ledger.service.js';
 
 
 @Injectable()
@@ -15,6 +17,7 @@ export class ShipmentsService {
     private readonly prisma: PrismaService,
     private readonly couriers: CouriersService,
     private readonly brands: BrandService,
+    private readonly ledger: PaymentLedgerService,
   ) {}
 
   /**
@@ -86,6 +89,46 @@ export class ShipmentsService {
     });
     const risk = rtoRisk({ paymentMode: input.paymentMode, orderValue: input.orderValue, codAdvance: advance, pincode: input.pincode, addressLine: input.addressLine, pastReturns });
 
+    const orderData = {
+      productBrand: input.productBrand,
+      pickupWarehouseId: warehouse.id,
+      rtoWarehouseId: rto?.id ?? warehouse.id,
+      customerName: input.customerName,
+      customerPhone: input.customerPhone,
+      addressLine: input.addressLine,
+      city: input.city ?? '',
+      state: input.state ?? '',
+      pincode: input.pincode,
+      paymentMode: input.paymentMode,
+      orderValue: input.orderValue,
+      codAmount: collect,
+      codAdvance: advance,
+      advanceStatus: advance > 0 ? 'PAID' : null,
+      weightGrams: input.weightGrams,
+      lengthCm: input.lengthCm,
+      breadthCm: input.breadthCm,
+      heightCm: input.heightCm,
+      items: [{ name: input.productName ?? 'Order items', qty: 1, price: input.orderValue }],
+      rtoRisk: risk.score,
+    };
+
+    // Payment guard: prepaid money (or a COD advance) must be in OUR account and not refunded.
+    // A blocked order is kept in Orders on hold; it books by itself when the money arrives.
+    let paid: GuardResult | null = null;
+    if (guardOn()) {
+      paid = await this.ledger.check(brandId, input.orderNumber, { paymentMode: input.paymentMode, orderValue: input.orderValue, codAdvance: advance });
+      if (paid.status !== 'VERIFIED' && paid.status !== 'NOT_NEEDED') {
+        const held = await this.prisma.order.upsert({
+          where: { brandId_orderNumber: { brandId, orderNumber: input.orderNumber } },
+          update: { ...orderData, advanceStatus: null, status: 'NEW' },
+          create: { ...orderData, advanceStatus: null, status: 'NEW', brandId, orderNumber: input.orderNumber, source: 'MANUAL', createdAt: now },
+        });
+        await this.ledger.stamp(held.id, paid, now);
+        await this.ledger.hold(brandId, held, paid, now);
+        throw new BadRequestException(`Not booked: payment not verified for #${input.orderNumber}. ${paid.reason} It books by itself once the money is in our account.`);
+      }
+    }
+
     // A courier whose connection fails is not a dead end: the next best courier is tried at
     // once, and the failure becomes an issue naming the courier who must fix it.
     // A courier picked by hand is not swapped silently; the error names the next best one.
@@ -132,34 +175,12 @@ export class ShipmentsService {
     const owner = await this.brands.ownerFor('OPS');
 
     const shipment = await this.prisma.$transaction(async (tx) => {
-      const orderData = {
-        productBrand: input.productBrand,
-        status: 'READY_TO_SHIP' as const,
-        pickupWarehouseId: warehouse.id,
-        rtoWarehouseId: rto?.id ?? warehouse.id,
-        customerName: input.customerName,
-        customerPhone: input.customerPhone,
-        addressLine: input.addressLine,
-        city: input.city ?? '',
-        state: input.state ?? '',
-        pincode: input.pincode,
-        paymentMode: input.paymentMode,
-        orderValue: input.orderValue,
-        codAmount: collect,
-        codAdvance: advance,
-        advanceStatus: advance > 0 ? 'PAID' : null,
-        weightGrams: input.weightGrams,
-        lengthCm: input.lengthCm,
-        breadthCm: input.breadthCm,
-        heightCm: input.heightCm,
-        items: [{ name: input.productName ?? 'Order items', qty: 1, price: input.orderValue }],
-        rtoRisk: risk.score,
-      };
       // An order that exists but was never booked is booked with the details entered now.
+      const orderRow = { ...orderData, status: 'READY_TO_SHIP' as const, ...(paid ? { paymentStatus: paid.status, paymentNote: paid.reason, paymentCheckedAt: now } : {}) };
       const order = await tx.order.upsert({
         where: { brandId_orderNumber: { brandId, orderNumber: input.orderNumber } },
-        update: orderData,
-        create: { ...orderData, brandId, orderNumber: input.orderNumber, source: 'MANUAL', createdAt: now },
+        update: orderRow,
+        create: { ...orderRow, brandId, orderNumber: input.orderNumber, source: 'MANUAL', createdAt: now },
       });
       const pickup = await tx.pickup.upsert({
         where: { warehouseId_courierCode_slotStart: { warehouseId: warehouse.id, courierCode: picked.courierCode, slotStart } },

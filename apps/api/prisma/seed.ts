@@ -11,6 +11,9 @@ import { codAdvanceFor } from '../src/common/cod-advance.js';
 import { istAt } from '../src/common/ist.js';
 import { CouriersService } from '../src/couriers/couriers.service.js';
 import { DEMO_COURIERS } from '../src/couriers/demo/profiles.js';
+import { AlertsService } from '../src/alerts/alerts.service.js';
+import { verdict } from '../src/payments/payment-guard.js';
+import { PaymentLedgerService } from '../src/payments/payment-ledger.service.js';
 import { PickupsService } from '../src/pickups/pickups.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { ShipmentsService } from '../src/shipments/shipments.service.js';
@@ -24,6 +27,8 @@ async function main() {
     update: {},
     create: { name: 'D2C Ecommerce India', slug: 'd2c' },
   });
+  // Our own collection accounts (demo values; set the real UPI IDs in Payments).
+  if (!brand.payees.length) await prisma.brand.update({ where: { id: brand.id }, data: { payees: ['d2cecommerce@icici', 'D2C Ecommerce India'] } });
 
   // Couriers: all in DEMO mode until live accounts are ready. Xpressbees is the backup.
   for (const c of DEMO_COURIERS) {
@@ -99,6 +104,9 @@ async function main() {
     ['18907', 'AccessHim', 'Steel bracelet', 'Arjun P.', '560034', 'Bengaluru', 'Karnataka', 'COD', 899],
     ['18908', 'AccessHer', 'Kada bangle set', 'Divya M.', '603112', 'Chennai', 'Tamil Nadu', 'COD', 614],
     ['18909', 'AccessHer', 'Gold-plated bangles set', 'Bhawana J.', '401107', 'Mumbai', 'Maharashtra', 'COD', 360],
+    // The two payment mistakes we have actually had: paid to a wrong QR, and paid then refunded the same day.
+    ['18910', 'AccessHer', 'Pearl earrings', 'Ritika K.', '700019', 'Kolkata', 'West Bengal', 'PREPAID', 499],
+    ['18911', 'Kasrat', 'Hex dumbbell pair', 'Sana A.', '411014', 'Pune', 'Maharashtra', 'PREPAID', 2224],
   ] as const;
   for (const [i, [orderNumber, productBrand, product, name, pincode, city, state, paymentMode, value]] of fresh.entries()) {
     await prisma.order.upsert({
@@ -130,6 +138,31 @@ async function main() {
     });
   }
 
+  // What the gateway and bank statement show for those orders.
+  const demoPay: Array<[string, string, number, number, string | null]> = [
+    ['18906', 'pay_demo18906', 1499, 0, null],
+    ['18907', 'pay_demo18907', codAdvanceFor(899), 0, null],
+    ['18908', 'pay_demo18908', codAdvanceFor(614), 0, null],
+    ['18909', 'pay_demo18909', codAdvanceFor(360), 0, null],
+    ['18910', '432918776120', 499, 0, 'starindia.mumbai@ybl'],
+    ['18911', 'pay_demo18911', 2224, 2224, null],
+  ];
+  for (const [orderNumber, reference, amount, refunded, payee] of demoPay) {
+    await prisma.payment.upsert({
+      where: { brandId_reference: { brandId: brand.id, reference } },
+      update: {},
+      create: { brandId: brand.id, orderNumber, reference, source: payee ? 'UPI' : 'GATEWAY', method: 'UPI', payee, amount, refundedAmount: refunded, status: refunded ? 'REFUNDED' : 'CAPTURED', paidAt: new Date(), refundedAt: refunded ? new Date() : null },
+    });
+  }
+  const ledger = new PaymentLedgerService(prisma, new BrandService(prisma), new AlertsService(prisma, new BrandService(prisma)));
+  const payees = (await prisma.brand.findUniqueOrThrow({ where: { id: brand.id } })).payees;
+  for (const o of await prisma.order.findMany({ where: { brandId: brand.id, orderNumber: { in: fresh.map((f) => f[0]) }, paymentStatus: null } })) {
+    const pays = await prisma.payment.findMany({ where: { brandId: brand.id, orderNumber: o.orderNumber } });
+    const r = verdict({ paymentMode: o.paymentMode, orderValue: Number(o.orderValue), codAdvance: Number(o.codAdvance) }, pays.map((p) => ({ reference: p.reference, amount: Number(p.amount), refundedAmount: Number(p.refundedAmount), status: p.status, payee: p.payee })), payees);
+    await ledger.stamp(o.id, r, new Date());
+    if (r.status !== 'VERIFIED' && r.status !== 'NOT_NEEDED') await ledger.hold(brand.id, o, r, new Date());
+  }
+
   if (process.env.SEED_DEMO_HISTORY !== 'false' && (await prisma.shipment.count()) === 0) {
     await demoHistory(brand.id);
   }
@@ -153,7 +186,8 @@ async function main() {
 async function demoHistory(brandId: string) {
   const brands = new BrandService(prisma);
   const couriers = new CouriersService();
-  const shipments = new ShipmentsService(prisma, couriers, brands);
+  const ledger = new PaymentLedgerService(prisma, brands, new AlertsService(prisma, brands));
+  const shipments = new ShipmentsService(prisma, couriers, brands, ledger);
   const pickups = new PickupsService(prisma, couriers, brands);
   const tracking = new TrackingService(prisma, couriers, brands);
 
@@ -243,6 +277,16 @@ async function demoHistory(brandId: string) {
     const at = new Date(t);
     for (; i < bookings.length && bookings[i].at.getTime() <= t; i++) {
       try {
+        // The customer paid at checkout (prepaid, or the COD advance): the gateway saw it.
+        const r = bookings[i].row;
+        const due = r.paymentMode === 'PREPAID' ? r.orderValue : (r.codAdvance ?? 0);
+        if (due > 0) {
+          await prisma.payment.upsert({
+            where: { brandId_reference: { brandId, reference: `pay_demo${r.orderNumber}` } },
+            update: {},
+            create: { brandId, orderNumber: r.orderNumber, reference: `pay_demo${r.orderNumber}`, source: 'GATEWAY', method: 'UPI', amount: due, status: 'CAPTURED', paidAt: bookings[i].at },
+          });
+        }
         await shipments.book(bookings[i].row, bookings[i].at);
       } catch (e) {
         console.warn(`Skipped demo order ${bookings[i].row.orderNumber}: ${(e as Error).message}`);

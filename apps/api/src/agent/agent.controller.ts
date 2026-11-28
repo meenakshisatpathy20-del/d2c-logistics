@@ -1,10 +1,11 @@
-import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
 import type { z } from 'zod';
 import type { SessionUser } from '../auth/auth.guard.js';
 import { Public } from '../auth/public.decorator.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { AgentService, AskSchema, InboundSchema } from './agent.service.js';
+import { GroupMessageSchema, TriageSchema, TriageService } from './triage.service.js';
 
 type Req = { user?: SessionUser };
 
@@ -18,7 +19,10 @@ const actor = (req: Req) => ({ id: req.user!.id, name: req.user!.name, role: req
 
 @Controller('agent')
 export class AgentController {
-  constructor(private readonly agent: AgentService) {}
+  constructor(
+    private readonly agent: AgentService,
+    private readonly triageAgent: TriageService,
+  ) {}
 
   @Get('feed')
   feed() {
@@ -71,5 +75,31 @@ export class AgentController {
     if (!want || !token || token.length !== want.length || !timingSafeEqual(Buffer.from(token), Buffer.from(want))) throw new UnauthorizedException();
     const m = parse(InboundSchema, body);
     return this.agent.inbound(m.phone, m.text);
+  }
+
+  /** Paste a courier WhatsApp chat (or export it as .txt): the triage agent files every message on its case. */
+  @Roles('ADMIN', 'OPS', 'WAREHOUSE', 'SUPPORT', 'FINANCE')
+  @Post('triage')
+  @HttpCode(200)
+  triage(@Body() body: unknown, @Req() req: Req) {
+    return this.triageAgent.triage(parse(TriageSchema, body), actor(req));
+  }
+
+  @Get('triage/ledger')
+  ledger(@Query('courier') courier?: string) {
+    return this.triageAgent.ledger(courier?.toUpperCase() || undefined);
+  }
+
+  /**
+   * Live messages from a courier's WhatsApp (or Telegram) group, through the
+   * bridge. Signed with AGENT_INBOUND_TOKEN, like the reply webhook.
+   */
+  @Public()
+  @Post('group-message')
+  @HttpCode(200)
+  groupMessage(@Body() body: unknown, @Headers('x-agent-token') token?: string) {
+    const want = process.env.AGENT_INBOUND_TOKEN;
+    if (!want || !token || token.length !== want.length || !timingSafeEqual(Buffer.from(token), Buffer.from(want))) throw new UnauthorizedException();
+    return this.triageAgent.groupMessage(parse(GroupMessageSchema, body));
   }
 }

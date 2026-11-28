@@ -56,7 +56,8 @@ export class WatchdogService {
   /** An order that came in but was never booked within 24 hours. */
   private async notBooked(brandId: string, now: Date) {
     const orders = await this.prisma.order.findMany({
-      where: { brandId, status: 'NEW', createdAt: { lt: new Date(now.getTime() - DAY) }, shipments: { none: { status: { not: 'CANCELLED' } } } },
+      // Orders held by the payment guard have their own payment issue; they are not "forgotten".
+      where: { brandId, status: 'NEW', createdAt: { lt: new Date(now.getTime() - DAY) }, shipments: { none: { status: { not: 'CANCELLED' } } }, OR: [{ paymentStatus: null }, { paymentStatus: { notIn: ['PENDING', 'MISMATCH', 'REFUNDED'] } }] },
       include: { pickupWarehouse: true },
     });
     for (const o of orders) {

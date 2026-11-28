@@ -59,3 +59,33 @@ export async function llmIntent(text: string, now: Date): Promise<Intent | null>
       return { kind: o.kind };
   }
 }
+
+const TriageSchema = z.object({
+  kind: z.enum(['ASK', 'PROMISE', 'DONE', 'CLAIM', 'MONEY', 'BLOCKED', 'REPLY', 'INFO']),
+  type: z
+    .enum(['PICKUP_PENDING', 'PICKUP_CLAIM', 'RTO_STATUS', 'DELAYED', 'LOST', 'DAMAGED', 'NOT_RECEIVED', 'FAKE_ATTEMPT', 'ADDRESS_CHANGE', 'WEIGHT_CHARGE', 'CREDIT_NOTE_PENDING', 'COD_REMITTANCE_LATE', 'BOOKING_BLOCKED', 'OTHER'])
+    .nullable(),
+  when: z.string().nullable().describe('The time promised, as written (e.g. "tomorrow 11 am", "by 4 pm"), or null'),
+});
+
+const TRIAGE_SYSTEM = `You read one message from a WhatsApp group between an Indian D2C brand and a courier or aggregator (Hindi, English or both).
+Say what the message does: ASK (asks for an update or action), PROMISE (commits to do something, with or without a time),
+DONE (says it is done: picked up, delivered, marked RTO), CLAIM (an excuse: warehouse closed, not ready, nobody there),
+MONEY (money owed, credit, refund, COD remittance), BLOCKED (bookings or business on hold), REPLY (any other answer), INFO (chit-chat, greetings).
+Pick the shipment problem it is about, or null.`;
+
+/** Claude reads a courier-chat message the plain rules could not place. Off without ANTHROPIC_API_KEY. */
+export async function llmTriage(text: string, now: Date): Promise<{ kind: 'ASK' | 'PROMISE' | 'DONE' | 'CLAIM' | 'MONEY' | 'BLOCKED' | 'REPLY' | 'INFO'; type: string | null; promiseAt: Date | null } | null> {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  client ??= new Anthropic();
+  const res = await client.messages.parse({
+    model: process.env.AGENT_MODEL ?? 'claude-opus-5-5',
+    max_tokens: 512,
+    system: TRIAGE_SYSTEM,
+    messages: [{ role: 'user', content: text.slice(0, 2000) }],
+    output_config: { format: zodOutputFormat(TriageSchema) },
+  });
+  const o = res.parsed_output;
+  if (!o) return null;
+  return { kind: o.kind, type: o.type === 'OTHER' ? null : o.type, promiseAt: o.when ? parseWhen(o.when, now) : null };
+}

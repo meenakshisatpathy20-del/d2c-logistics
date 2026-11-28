@@ -14,7 +14,7 @@ describe('AppController', () => {
 
   it('reports ok when the database answers', async () => {
     const controller = await controllerWith(() => Promise.resolve([{ '?column?': 1 }]));
-    expect(await controller.health()).toMatchObject({ status: 'ok', database: 'up', jobs: { status: 'running' } });
+    expect(await controller.health()).toMatchObject({ status: 'ok', database: 'up', jobs: { status: process.env.JOBS_ENABLED === 'false' ? 'off' : 'running' } });
   });
 
   it('reports degraded when the database is down', async () => {

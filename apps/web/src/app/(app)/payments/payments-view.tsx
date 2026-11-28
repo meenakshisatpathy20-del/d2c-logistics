@@ -4,6 +4,7 @@ import { Card, DemoBadge } from "@/components/ui/primitives";
 import { getPayments } from "@/lib/api";
 import { formatINR } from "@/lib/format";
 import { useLive } from "@/lib/use-live";
+import { PaymentGuardPanel } from "./payment-guard";
 
 export function PaymentsView() {
   const { data } = useLive(getPayments, 60_000);
@@ -16,6 +17,7 @@ export function PaymentsView() {
   ];
   return (
     <>
+      <PaymentGuardPanel />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {tiles.map((t) => (
           <Card key={t.label} className="p-4">

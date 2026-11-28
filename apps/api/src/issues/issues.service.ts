@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
-import { AlertsService, fullLink } from '../alerts/alerts.service.js';
+import { AlertsService } from '../alerts/alerts.service.js';
 import { BrandService } from '../common/brand.service.js';
 import { closedReason, hoursLabel, istHour, slotFits, slotLabel } from '../common/ist.js';
 import { DEMO_COURIERS } from '../couriers/demo/profiles.js';
@@ -261,7 +261,6 @@ export class IssuesService {
       if (now.getTime() - since < REMIND_EVERY_HOURS * HOUR) continue;
       const count = f.reminderCount + 1;
       const target = this.reminderTarget(f);
-      const link = `/issues/${f.id}`;
       const waitedH = Math.max(1, Math.round((now.getTime() - f.waitingSince!.getTime()) / HOUR));
       await this.alerts.notify({
         brandId,
@@ -297,7 +296,8 @@ export class IssuesService {
 
   private reminderTarget(f: Flag): { name: string; phone: string | null } {
     if (f.waitingOn === 'CUSTOMER') {
-      return f.shipment ? { name: `${f.shipment.order.customerName} (customer)`, phone: f.shipment.order.customerPhone } : { name: 'Customer', phone: null };
+      const o = f.shipment?.order ?? f.order;
+      return o ? { name: `${o.customerName} (customer)`, phone: o.customerPhone } : { name: 'Customer', phone: null };
     }
     if (f.waitingOn === 'VENDOR') {
       const w = this.vendorOf(f);
@@ -869,6 +869,40 @@ export class IssuesService {
     });
     await this.tellOwner(f, `${this.courierOf(f)?.name} answered`, body, now);
     return this.partnerView(id, now);
+  }
+
+  /**
+   * A line from a courier WhatsApp group, read by the triage agent and put on
+   * the record: our ask passes the turn to the courier; their time becomes a
+   * promise (no reminders until then); anything else from them passes the turn
+   * back to us. "Done" is noted, but only the scan closes the issue.
+   */
+  async logChat(id: string, m: { party: 'OURS' | 'COURIER' | 'VENDOR'; who: string; body: string; kind: string; promiseAt: Date | null; at: Date }, now = new Date()) {
+    const brandId = await this.brands.currentBrandId();
+    const f = await this.load(id, brandId);
+    if (f.resolvedAt) return false;
+    const theirs = m.party !== 'OURS';
+    const promise = m.promiseAt && m.promiseAt > now ? m.promiseAt : null;
+    await this.event(id, {
+      kind: theirs ? 'PARTNER_REPLY' : m.kind === 'ASK' ? 'ASK' : 'MESSAGE',
+      actorName: `${m.who} (WhatsApp group)`,
+      actorParty: m.party,
+      body: m.kind === 'DONE' ? `Says done: ${m.body}. Closes by itself when the scan shows it.` : m.body,
+      via: 'WHATSAPP',
+      promiseAt: promise,
+      at: m.at,
+    });
+    const other: Party = f.waitingOn === 'VENDOR' ? 'VENDOR' : 'COURIER';
+    const reset = { waitingSince: now, reminderCount: 0, lastReminderAt: null };
+    if (promise) {
+      await this.prisma.redFlag.update({ where: { id }, data: { ...reset, waitingOn: theirs ? m.party : other, promiseAt: promise, promiseText: m.body.slice(0, 200), dueAt: promise, escalationLevel: 0, escalatedAt: null } });
+    } else if (!theirs && m.kind === 'ASK') {
+      await this.prisma.redFlag.update({ where: { id }, data: { ...reset, waitingOn: other, promiseAt: null, promiseText: null } });
+    } else if (theirs) {
+      await this.prisma.redFlag.update({ where: { id }, data: { ...reset, waitingOn: 'OURS', promiseAt: null, promiseText: null } });
+    }
+    if (theirs) await this.tellOwner(f, `${m.who} answered in WhatsApp`, m.body.slice(0, 300), now);
+    return true;
   }
 
   /** A proof photo (warehouse shutter, parcel, delivery) with when and, if the phone shares it, where. */

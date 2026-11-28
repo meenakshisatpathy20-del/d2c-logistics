@@ -296,7 +296,7 @@ export type OrderDetail = {
   brand: string;
   items: { name: string; qty: number; price: number }[];
   customer: { name: string; phone: string; address: string; city: string; state: string; pincode: string };
-  payment: { mode: "COD" | "PREPAID"; orderValue: number; collect: number; advance: number; advanceStatus: string | null };
+  payment: { mode: "COD" | "PREPAID"; orderValue: number; collect: number; advance: number; advanceStatus: string | null; check: string | null; checkNote: string | null };
   parcel: { weightGrams: number; lengthCm: number; breadthCm: number; heightCm: number };
   pickupFrom: { code: string; name: string; city: string; pincode: string };
   returnTo: { name: string; city: string } | null;
@@ -708,3 +708,44 @@ export const decideAgent = (id: string, ok: boolean) => request<AgentMsg>(`/api/
 export const chaseIssue = (id: string) => request<AgentMsg>(`/api/agent/issues/${id}/chase`, { method: "POST" });
 export const importCourierContacts = (csv: string) =>
   request<{ added: number; updated: number; errors: { line: number; error: string }[] }>("/api/settings/courier-contacts/import", { method: "POST", body: JSON.stringify({ csv }) });
+
+// ---------- Triage agent: courier WhatsApp chats ----------
+
+export type TriageItem = { at: string; sender: string; party: "OURS" | "COURIER" | "VENDOR" | "UNKNOWN"; text: string; kind: string; did: string[]; tone: "red" | "amber" | "green" | "blue" | "grey"; href?: string };
+export type TriageResult = { summary: string; read: number; skipped: number; opened: number; updated: number; promises: number; unmatched: string[]; items: TriageItem[] };
+export const triageChat = (b: { text: string; courierCode?: string; ourNames?: string }) => request<TriageResult>("/api/agent/triage", { method: "POST", body: JSON.stringify(b) });
+export type LedgerRow = { id: string; at: string; sender: string; party: string; courierCode: string | null; body: string; kind: string; refs: string[]; unmatched: string[]; flagIds: string[]; promiseAt: string | null; readBy: string };
+export const getTriageLedger = () => request<{ stats: { total: number; filed: number; promised: number }; rows: LedgerRow[] }>("/api/agent/triage/ledger");
+
+// ---------- Payment guard ----------
+
+export type HeldOrder = {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  amount: number;
+  paymentMode: "PREPAID" | "COD";
+  status: "PENDING" | "MISMATCH" | "REFUNDED";
+  reason: string | null;
+  shipped: { courier: string; awb: string; status: string } | null;
+  issueId: string | null;
+  checkedAt: string | null;
+};
+export type LedgerPayment = { reference: string; orderNumber: string; amount: number; refunded: number; status: string; payee: string | null; ours: boolean; source: string; at: string };
+export type PaymentGuard = { guard: "on" | "off"; payees: string[]; held: HeldOrder[]; recent: LedgerPayment[] };
+export const getPaymentGuard = () => request<PaymentGuard>("/api/payments/guard");
+export type ImportOutcome = { orderNumber: string; status: string; did: string; reason: string };
+export const importStatement = (csv: string) =>
+  request<{ rows: number; added: number; updated: number; unchanged: number; errors: string[]; outcomes: ImportOutcome[] }>("/api/payments/import", { method: "POST", body: JSON.stringify({ csv }) });
+export type ProofCheck = {
+  orderNumber: string;
+  verdict: "PAID_TO_US" | "WRONG_ACCOUNT" | "REFUNDED" | "NOT_FOUND" | "FAILED";
+  read: { utr: string | null; payee: string | null; amount: number | null; status: string; app: string | null } | null;
+  utr: string | null;
+  payee: string | null;
+  findings: string[];
+  payment: ImportOutcome;
+};
+export const checkPaymentProof = (b: { orderNumber: string; dataUrl?: string; utr?: string; payee?: string }) =>
+  request<ProofCheck>("/api/payments/proof", { method: "POST", body: JSON.stringify(b) });
+export const setPayees = (payees: string[]) => request<{ payees: string[] }>("/api/payments/accounts", { method: "PUT", body: JSON.stringify({ payees }) });

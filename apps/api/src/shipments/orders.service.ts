@@ -235,6 +235,9 @@ export class OrdersService {
         collect: Number(o.codAmount),
         advance: Number(o.codAdvance),
         advanceStatus: o.advanceStatus,
+        // The payment guard's last word on this order: is the money really ours?
+        check: o.paymentStatus,
+        checkNote: o.paymentNote,
       },
       parcel: { weightGrams: o.weightGrams, lengthCm: o.lengthCm, breadthCm: o.breadthCm, heightCm: o.heightCm },
       pickupFrom: { code: o.pickupWarehouse.code, name: o.pickupWarehouse.name, city: o.pickupWarehouse.city, pincode: o.pickupWarehouse.pincode },

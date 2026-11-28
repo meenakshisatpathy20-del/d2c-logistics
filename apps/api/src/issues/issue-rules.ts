@@ -28,6 +28,7 @@ export const RAISED: Record<string, { label: string; group: Group; scope: Scope 
   EXECUTIVE_CONDUCT: { label: 'Delivery person asked for extra money or misbehaved', group: 'DELIVERY', scope: 'order' },
   ADDRESS_CHANGE: { label: 'Customer wants a new date or address', group: 'DELIVERY', scope: 'order' },
   RTO_NO_ATTEMPT: { label: 'Return started without a real delivery attempt', group: 'RETURNS', scope: 'order' },
+  RTO_STATUS: { label: 'Return (RTO) status or address not updated', group: 'RETURNS', scope: 'order' },
   RTO_NOT_RECEIVED: { label: 'Return not received at our warehouse', group: 'RETURNS', scope: 'order' },
   REVERSE_PICKUP_PENDING: { label: 'Customer return not picked up', group: 'RETURNS', scope: 'order' },
   WEIGHT_CHARGE: { label: 'Charged for a higher weight', group: 'WEIGHT', scope: 'order' },
@@ -59,6 +60,16 @@ export const WATCHDOG: Record<string, { label: string; group: Group; turn: Party
   ATTEMPTS_3: { label: '3 or more failed delivery attempts', group: 'DELIVERY', turn: 'OURS' },
 };
 
+/**
+ * Raised by the payment guard: a prepaid order (or a COD advance) ships only
+ * when the money is seen in our own account and has not been refunded.
+ */
+export const PAYMENT: Record<string, { label: string; turn: Party }> = {
+  PAYMENT_PENDING: { label: 'Prepaid order: money not received in our account', turn: 'CUSTOMER' },
+  PAYMENT_WRONG_ACCOUNT: { label: 'Paid to an account that is not ours (wrong QR)', turn: 'CUSTOMER' },
+  PAYMENT_REFUNDED: { label: 'Payment refunded after the order was booked', turn: 'OURS' },
+};
+
 const GROUP: Record<string, Group> = {
   PICKUP_UNCONFIRMED: 'PICKUPS',
   PICKUP_MISSED: 'PICKUPS',
@@ -68,6 +79,7 @@ const GROUP: Record<string, Group> = {
   WEIGHT_DISPUTE: 'WEIGHT',
   ...Object.fromEntries(Object.entries(RAISED).map(([k, v]) => [k, v.group])),
   ...Object.fromEntries(Object.entries(WATCHDOG).map(([k, v]) => [k, v.group])),
+  ...Object.fromEntries(Object.keys(PAYMENT).map((k) => [k, 'MONEY' as Group])),
 };
 export const groupOf = (type: string): Group => GROUP[type] ?? 'OTHER';
 export const GROUP_TYPES = (g: Group) => Object.entries(GROUP).filter(([, v]) => v === g).map(([k]) => k);
@@ -76,7 +88,7 @@ export const GROUP_TYPES = (g: Group) => Object.entries(GROUP).filter(([, v]) =>
 export function firstTurn(type: string): Party {
   // Our team acts first where we hold the proof or must call the customer.
   if (['NDR', 'RTO', 'WEIGHT_DISPUTE', 'OTHER'].includes(type)) return 'OURS';
-  return WATCHDOG[type]?.turn ?? 'COURIER';
+  return WATCHDOG[type]?.turn ?? PAYMENT[type]?.turn ?? 'COURIER';
 }
 
 /** Which courier person an issue goes to first. */
@@ -89,13 +101,13 @@ export const OUTCOMES: Record<Group, string[]> = {
   DELIVERY: ['Delivered', 'Delivered after address fix', 'Attempt recorded', 'Returned to seller', 'Customer received it', 'Executive warned or changed', 'Claim raised with the courier', 'Claim paid', 'Customer cancelled'],
   RETURNS: ['Customer accepted after a call', 'Return received at warehouse', 'Reverse pickup done', 'Return charge reversed', 'Return stopped', 'Claim paid'],
   WEIGHT: ['Dispute won', 'Dispute lost', 'Charge accepted', 'Charge reversed'],
-  MONEY: ['Credited', 'Credit note received', 'Adjusted in the invoice', 'Remitted in full', 'Charge reversed', 'Claim paid', 'Written off'],
+  MONEY: ['Credited', 'Credit note received', 'Adjusted in the invoice', 'Remitted in full', 'Charge reversed', 'Claim paid', 'Written off', 'Payment verified', 'Shipment stopped', 'Returned to seller', 'Converted to COD', 'Order cancelled'],
   BOOKING: ['Booked', 'Order cancelled', 'Bookings unblocked', 'Booking fixed', 'Moved to another courier'],
   OTHER: ['Solved', 'Not a problem'],
 };
 
 /** Outcomes that are only true with a reference: UTR, credit note, claim or invoice number. */
-export const NEEDS_REFERENCE = ['Credited', 'Credit note received', 'Adjusted in the invoice', 'Remitted in full', 'Charge reversed', 'Claim paid', 'Return charge reversed'];
+export const NEEDS_REFERENCE = ['Payment verified', 'Credited', 'Credit note received', 'Adjusted in the invoice', 'Remitted in full', 'Charge reversed', 'Claim paid', 'Return charge reversed'];
 
 /** Reminders: every 2 hours, 9 am to 8 pm IST on working days. */
 export const REMIND_EVERY_HOURS = 2;
