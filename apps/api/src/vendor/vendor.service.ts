@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AlertsService, fullLink } from '../alerts/alerts.service.js';
+import { AlertsService } from '../alerts/alerts.service.js';
 import { BrandService } from '../common/brand.service.js';
 import { PickupsService } from '../pickups/pickups.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';

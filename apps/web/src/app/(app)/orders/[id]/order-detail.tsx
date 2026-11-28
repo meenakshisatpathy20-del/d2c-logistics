@@ -345,6 +345,23 @@ export function OrderDetailView({ id }: { id: string }) {
                   <Row label="Courier collects" value={formatINR(o.payment.collect)} strong />
                 </>
               ) : null}
+              {o.payment.check ? (
+                <div className="flex items-start justify-between gap-3 border-t border-line pt-2">
+                  <dt className="text-muted">Payment check</dt>
+                  <dd className="text-right">
+                    <span
+                      className={
+                        o.payment.check === "VERIFIED" || o.payment.check === "NOT_NEEDED"
+                          ? "font-medium text-[#0e6e05]"
+                          : "font-semibold text-flag-red"
+                      }
+                    >
+                      {{ VERIFIED: "Money in our account", NOT_NEEDED: "Nothing to collect online", PENDING: "On hold: money not received", MISMATCH: "On hold: paid to a wrong account", REFUNDED: "On hold: refunded" }[o.payment.check] ?? o.payment.check}
+                    </span>
+                    {o.payment.checkNote ? <span className="block text-[12px] text-muted">{o.payment.checkNote}</span> : null}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
           </Card>
 

@@ -29,6 +29,9 @@ model Brand {
   auditLogs  AuditLog[]
   notifications Notification[]
   summaries     DailySummary[]
+  // Our own accounts money may be paid into (UPI IDs, QR merchant names, bank
+  // accounts). A payment into anything else is a wrong-QR payment, not ours.
+  payees        String[]     @default([])
 }
 
 enum Role {
@@ -194,6 +197,12 @@ model Order {
   heightCm      Int
   items         Json // [{ name, sku, qty, price }]
   rtoRisk       Int? // 0-100, rule-based first
+  // Payment guard: null = not checked (booked before the guard), VERIFIED,
+  // PENDING (no money seen yet), MISMATCH (paid to an account that is not ours),
+  // REFUNDED (money went back to the customer), NOT_NEEDED (COD with no advance).
+  paymentStatus    String?
+  paymentNote      String?
+  paymentCheckedAt DateTime?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -559,4 +568,57 @@ model AgentApproval {
   decidedAt   DateTime?
 
   @@index([brandId, status])
+}
+
+/**
+ * Money actually received, from the payment gateway, the UPI/bank statement or
+ * a webhook. An order ships only when this ledger shows the money is ours and
+ * still with us; a screenshot or "payment done" in a chat is never enough.
+ */
+model Payment {
+  id             String    @id @default(cuid())
+  brandId        String
+  orderNumber    String
+  reference      String // UTR, gateway payment ID or bank reference
+  source         String // GATEWAY, UPI, BANK, WEBHOOK, CSV
+  method         String? // UPI, CARD, NETBANKING, QR
+  payee          String? // the account it was paid into; null = our own gateway
+  amount         Decimal   @db.Decimal(12, 2)
+  refundedAmount Decimal   @default(0) @db.Decimal(12, 2)
+  status         String // CAPTURED, FAILED, REFUNDED, PARTIALLY_REFUNDED
+  paidAt         DateTime
+  refundedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([brandId, reference])
+  @@index([brandId, orderNumber])
+}
+
+/**
+ * Resolve Hub ledger: every courier-chat message the triage agent read, what it
+ * understood and which cases it opened or updated. The same message read twice
+ * (a chat export pasted again) is recognised and skipped.
+ */
+model ChatMessage {
+  id          String   @id @default(cuid())
+  brandId     String
+  source      String // WHATSAPP_EXPORT, PASTE, WEBHOOK
+  courierCode String? // the courier's group it came from
+  sender      String
+  party       String // OURS, COURIER, VENDOR, UNKNOWN
+  sentAt      DateTime
+  body        String
+  refs        String[] // AWBs and order numbers it mentions (or inherits from the message it answers)
+  kind        String // ASK, PROMISE, DONE, REPLY, CLAIM, MONEY, INFO
+  issueType   String?
+  promiseAt   DateTime?
+  flagIds     String[]
+  unmatched   String[] // AWBs not on EcomNext (still booked elsewhere)
+  readBy      String // RULES or CLAUDE
+  hash        String
+  createdAt   DateTime @default(now())
+
+  @@unique([brandId, hash])
+  @@index([brandId, sentAt])
 }

@@ -6,6 +6,7 @@ import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { CouriersModule } from './couriers/couriers.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { ShipmentsModule } from './shipments/shipments.module.js';
@@ -20,6 +21,7 @@ import { ShipmentsModule } from './shipments/shipments.module.js';
     ShipmentsModule,
     JobsModule,
     SettingsModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
